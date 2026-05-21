@@ -31,7 +31,6 @@ cd ai-usage-monitor
 bash install.sh
 ```
 
-> 推送到 GitHub 后，请将 `YOUR_USERNAME` 替换为你的实际用户名。
 
 ### 第二步：启动
 

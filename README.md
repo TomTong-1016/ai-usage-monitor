@@ -31,7 +31,6 @@ cd ai-usage-monitor
 bash install.sh
 ```
 
-> Replace `YOUR_USERNAME` with your actual GitHub username after you've pushed the repo.
 
 ### Step 2 — Start the server
 
