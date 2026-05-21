@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -286,7 +286,7 @@
     };
 
     // Current language — persisted in localStorage
-    let lang = localStorage.getItem("dashboard_lang") || "zh";
+    let lang = localStorage.getItem("dashboard_lang") || "en";
     function t(key) { return I18N[lang][key] ?? I18N["zh"][key] ?? key; }
 
     function applyLang() {
