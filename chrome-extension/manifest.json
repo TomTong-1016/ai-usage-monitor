@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "AI Usage Monitor — Credential Exporter",
+  "version": "1.0.0",
+  "description": "One-click export of cookies and auth headers for AI Usage Monitor dashboard",
+  "permissions": [
+    "cookies",
+    "webRequest",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://www.trae.ai/*",
+    "https://api-sg-central.trae.ai/*",
+    "https://platform.minimaxi.com/*",
+    "https://www.minimaxi.com/*",
+    "https://www.kimi.com/*",
+    "https://platform.deepseek.com/*",
+    "https://bailian.console.aliyun.com/*",
+    "https://dashscope-intl.aliyuncs.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AI Usage Monitor"
+  }
+}

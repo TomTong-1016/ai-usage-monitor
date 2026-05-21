@@ -1,0 +1,31 @@
+{
+  "usages": [
+    {
+      "scope": "FEATURE_CODING",
+      "detail": {
+        "limit": "100",
+        "used": "53",
+        "remaining": "47",
+        "resetTime": "2026-05-18T01:51:09.483625Z"
+      },
+      "limits": [
+        {
+          "window": {
+            "duration": 300,
+            "timeUnit": "TIME_UNIT_MINUTE"
+          },
+          "detail": {
+            "limit": "100",
+            "used": "59",
+            "remaining": "41",
+            "resetTime": "2026-05-14T13:51:09.483625Z"
+          }
+        }
+      ]
+    }
+  ],
+  "totalQuota": {
+    "limit": "100",
+    "remaining": "99"
+  }
+}

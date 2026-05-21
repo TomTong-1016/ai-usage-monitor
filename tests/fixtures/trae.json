@@ -1,0 +1,7 @@
+{
+  "code": 1001,
+  "is_dollar_usage_billing": false,
+  "is_pay_freshman": false,
+  "message": "We're sorry, but we are not able to authenticate you.",
+  "user_entitlement_pack_list": []
+}

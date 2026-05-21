@@ -1,0 +1,69 @@
+# ============================================================
+# Credentials & Private Data — NEVER commit these
+# ============================================================
+
+# Cookie files (contain real session tokens)
+cookie/*.txt
+cookie/*.json
+!cookie/.gitkeep
+
+# Request header files (contain real sessionKey, Bearer tokens, cookies)
+header-txt/*.txt
+header-txt/*.json
+!header-txt/.gitkeep
+
+# Request overrides (may contain session tokens or API secrets)
+request_overrides/*.json
+!request_overrides/.gitkeep
+
+# Local config with real org IDs and platform settings
+config.json
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.env/
+*.egg-info/
+dist/
+build/
+
+# ============================================================
+# macOS
+# ============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ============================================================
+# AI Agent & IDE development directories
+# ============================================================
+.claude/
+.trae/
+.agent/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Development-only docs
+# ============================================================
+docs/superpowers/
+docs/cookie-troubleshooting.md
+
+# ============================================================
+# Logs & temporary files
+# ============================================================
+*.log
+*.tmp
+*.bak

@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 模型用量看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-zinc-950 text-zinc-100">
+
+    <!-- ── Main layout ── -->
+    <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-5 py-6">
+
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
+        <div>
+          <h1 id="headerTitle" class="text-2xl font-semibold">AI 模型用量看板</h1>
+          <p id="status" class="mt-1 text-sm text-zinc-400">正在加载…</p>
+        </div>
+        <div class="flex gap-2">
+          <!-- Language toggle -->
+          <button id="btnLang"
+            class="inline-flex h-10 items-center rounded-md border border-zinc-700 px-3 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+            type="button">EN</button>
+          <button id="btnRefresh"
+            class="inline-flex h-10 items-center rounded-md border border-zinc-700 px-4 text-sm font-medium text-zinc-100 hover:bg-zinc-900 disabled:opacity-40"
+            type="button">刷新</button>
+          <button id="btnAdd"
+            class="inline-flex h-10 items-center gap-1.5 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500"
+            type="button">
+            <span class="text-lg leading-none">+</span><span id="btnAddText"> 添加平台</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Card grid -->
+      <section id="grid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></section>
+
+      <!-- Empty state (shown when no platforms enabled) -->
+      <div id="emptyState" class="hidden flex-1 flex flex-col items-center justify-center gap-6 py-20">
+        <div class="text-center">
+          <div class="mb-4 text-6xl opacity-20">📊</div>
+          <h2 id="emptyTitle" class="text-xl font-semibold text-zinc-300">还没有添加任何平台</h2>
+          <p id="emptySubtitle" class="mt-2 text-sm text-zinc-500">点击下方按钮，选择你使用的 AI 平台</p>
+        </div>
+        <button id="btnAddEmpty"
+          class="inline-flex h-12 items-center gap-2 rounded-lg bg-indigo-600 px-6 text-base font-semibold text-white hover:bg-indigo-500"
+          type="button">
+          <span class="text-xl leading-none">+</span> <span id="btnAddEmptyText">添加平台</span>
+        </button>
+      </div>
+
+    </main>
+
+    <!-- ══════════════════════════════════════════════════════════
+         Modal overlay
+         ══════════════════════════════════════════════════════════ -->
+    <div id="modal" class="fixed inset-0 z-50 hidden">
+      <!-- Backdrop -->
+      <div class="absolute inset-0 bg-black/70" id="modalBackdrop"></div>
+
+      <!-- Modal panel -->
+      <div class="absolute left-1/2 top-1/2 flex max-h-[88vh] w-[min(540px,calc(100vw-2rem))]
+                  -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-zinc-800
+                  bg-zinc-950 shadow-2xl overflow-hidden">
+
+        <!-- Modal header -->
+        <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-4 shrink-0">
+          <div class="flex items-center gap-2">
+            <button id="modalBack"
+              class="hidden h-8 w-8 items-center justify-center rounded-md border border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+              type="button">←</button>
+            <h2 id="modalTitle" class="text-base font-semibold"></h2>
+          </div>
+          <button id="modalClose"
+            class="h-8 w-8 inline-flex items-center justify-center rounded-md border border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+            type="button">✕</button>
+        </div>
+
+        <!-- Modal body -->
+        <div id="modalBody" class="overflow-y-auto px-5 py-5 flex-1"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         Script
+         ══════════════════════════════════════════════════════════ -->
+    <script>
+    // ── Cookie-file → platform mapping (mirrors fetcher.py PLATFORMS) ──────────
+    // Used client-side to detect which platforms are present in a credentials.json
+
+    const COOKIE_FILE_TO_PLATFORM = {
+      "claude.ai_cookies.txt":               "claude",
+      "chatgpt.com_cookies.txt":             "codex",
+      "www.trae.ai_cookies.txt":             "trae",
+      "platform.minimaxi.com_cookies.txt":   "minimax",
+      "www.kimi.com_cookies.txt":            "kimi",
+      "platform.deepseek.com_cookies.txt":   "deepseek",
+    };
+
+    /**
+     * Given a parsed credentials.json object, return the set of platform IDs
+     * whose cookies or headers are present and non-empty in the file.
+     */
+    function detectPlatformsInJson(data) {
+      const found = new Set();
+      for (const [filename, text] of Object.entries(data.cookies || {})) {
+        if (text && text.trim() && COOKIE_FILE_TO_PLATFORM[filename]) {
+          found.add(COOKIE_FILE_TO_PLATFORM[filename]);
+        }
+      }
+      // Headers can also signal a platform (e.g. claude-header.txt)
+      for (const filename of Object.keys(data.headers || {})) {
+        const base = filename.replace(/-header\.txt$/, "").replace(/-\w+\.txt$/, "");
+        if (allPlatforms.find(p => p.id === base)) found.add(base);
+      }
+      return found;
+    }
+
+    // ── i18n ───────────────────────────────────────────────────────────────────
+
+    const I18N = {
+      zh: {
+        pageTitle:          "AI 模型用量看板",
+        headerTitle:        "AI 模型用量看板",
+        statusLoading:      "正在加载…",
+        statusRefreshing:   "正在刷新…",
+        statusUpdated:      "最近更新",
+        statusFailed:       "加载失败，请刷新重试",
+        statusNone:         "尚未添加任何平台",
+        btnRefresh:         "刷新",
+        btnAdd:             "添加平台",
+        btnLang:            "EN",
+        emptyTitle:         "还没有添加任何平台",
+        emptySubtitle:      "点击下方按钮，选择你使用的 AI 平台",
+        btnAddEmpty:        "添加平台",
+        // Card
+        cardRemoveTitle:    "移除",
+        cardViewBtn:        "查看",
+        cardNoData:         "暂无数据",
+        cardReimportTitle:  "重新导入",
+        resetPrefix:        "重置",
+        // Modal
+        modalPickerTitle:   "选择要添加的平台",
+        modalLocalSection:  "本地 App — 无需配置",
+        modalPluginSection: "需要 Chrome 插件",
+        platformAdded:      "已添加",
+        detectBtn:          "检测并启用",
+        detectingBtn:       "检测中…",
+        redetectBtn:        "重新检测",
+        detectFail:         "请求失败，请重试",
+        // Setup wizard
+        step1Title:         "安装 Chrome 插件",
+        step1Desc:          `打开 <code class="rounded bg-zinc-800 px-1 py-0.5">chrome://extensions/</code> → 开启开发者模式 → 加载已解压的扩展程序 → 选择项目的 <code class="rounded bg-zinc-800 px-1 py-0.5">chrome-extension/</code> 目录`,
+        step2Title:         "在 Chrome 中登录并访问平台",
+        step3Title:         "导出并上传凭据",
+        step3Desc:          `点击插件图标 → 「导出 credentials.json」→ 将文件上传到下方`,
+        dropText:           `拖拽 <strong class="text-zinc-200">credentials.json</strong> 到此处`,
+        dropOr:             "或点击选择文件",
+        importing:          "正在导入…",
+        uploadFail:         "上传失败，请重试",
+        // Multi-select picker
+        pickerNextBtn:      "下一步：上传凭据",
+        pickerSelectHint:   "可多选，选好后点「下一步」统一上传 credentials.json",
+        // Success
+        successTitle:       "导入成功 ✓",
+        successEnabled:     "以下平台已成功启用：",
+        successReady:       "以下平台已就绪：",
+        successNone:        "没有发现可启用的新平台",
+        successHintNew:     "数据将在后台自动获取，通常在几秒内出现在看板上。",
+        successHintNone:    "如果目标平台没有出现，请确认导出的 credentials.json 包含对应平台的 Cookie 和请求头。",
+        finishBtn:          "完成",
+        // Reimport
+        reimportTitle:      "重新导入凭据",
+        reimportDesc:       "上传新的 credentials.json 将覆盖当前凭据并自动刷新数据。",
+        // Platform confirm step
+        confirmTitle:       "确认要启用的平台",
+        confirmDesc:        "以下平台在 JSON 中检测到了凭据，请选择你想启用的。已移除的平台默认不勾选。",
+        confirmHintRemoved: "之前已移除",
+        confirmHintActive:  "当前已启用",
+        confirmHintNew:     "新平台",
+        confirmBtn:         "确认并导入",
+        confirmNoneWarn:    "请至少选择一个平台",
+        // Remove
+        removeTitle:        "移除平台",
+        removeConfirm:      "确定要从看板中移除",
+        removeConfirm2:     "吗？",
+        removeBtn:          "确认移除",
+        cancelBtn:          "取消",
+        // Details
+        detailsSuffix:      " 详情",
+        // Guide texts
+        guideVisitClaude:   "在 Chrome 中打开 Claude 用量页（插件自动捕获 Usage 请求头）",
+        guideVisitKimi:     "在 Chrome 中打开 Kimi 并登录",
+        guideVisitTrae:     "访问 Trae 账户/用量页面（插件自动捕获 Entitlement 请求头）",
+        guideVisitMinimax:  "访问 MiniMax 平台首页（插件自动捕获 Auth Header）",
+        guideVisitDeepseek: "访问 DeepSeek 用量页，停留几秒（触发全部 3 个 API）",
+        guideCodexDesc:     "服务端读取 Codex App 的本地磁盘缓存，<strong>无需任何手动配置</strong>。",
+        guideCodexNote:     "需要 Codex App 已安装并至少打开过一次（缓存才会存在）。",
+        guideCodexDl:       "下载 Codex App",
+        guideAntigravityDesc: "通过本地 Language Server 获取 Google Antigravity 用量，<strong>无需任何手动配置</strong>。",
+        guideAntigravityNote: "查看用量时需保持 Antigravity App 在运行状态。",
+        unitTimes:          "次",
+      },
+      en: {
+        pageTitle:          "AI Usage Monitor",
+        headerTitle:        "AI Usage Monitor",
+        statusLoading:      "Loading…",
+        statusRefreshing:   "Refreshing…",
+        statusUpdated:      "Last updated",
+        statusFailed:       "Failed to load, please refresh",
+        statusNone:         "No platforms added yet",
+        btnRefresh:         "Refresh",
+        btnAdd:             "Add Platform",
+        btnLang:            "中",
+        emptyTitle:         "No platforms added yet",
+        emptySubtitle:      "Click the button below to add an AI platform",
+        btnAddEmpty:        "Add Platform",
+        // Card
+        cardRemoveTitle:    "Remove",
+        cardViewBtn:        "View",
+        cardNoData:         "No data",
+        cardReimportTitle:  "Re-import",
+        resetPrefix:        "Resets",
+        // Modal
+        modalPickerTitle:   "Select platforms to add",
+        modalLocalSection:  "Local App — No setup required",
+        modalPluginSection: "Requires Chrome Extension",
+        platformAdded:      "Added",
+        detectBtn:          "Detect & Enable",
+        detectingBtn:       "Detecting…",
+        redetectBtn:        "Retry Detection",
+        detectFail:         "Request failed, please retry",
+        // Setup wizard
+        step1Title:         "Install Chrome Extension",
+        step1Desc:          `Open <code class="rounded bg-zinc-800 px-1 py-0.5">chrome://extensions/</code> → Enable Developer Mode → Load Unpacked → Select the <code class="rounded bg-zinc-800 px-1 py-0.5">chrome-extension/</code> directory`,
+        step2Title:         "Log in and visit the platform in Chrome",
+        step3Title:         "Export and upload credentials",
+        step3Desc:          `Click the extension icon → "Export credentials.json" → Upload the file below`,
+        dropText:           `Drop <strong class="text-zinc-200">credentials.json</strong> here`,
+        dropOr:             "or click to choose file",
+        importing:          "Importing…",
+        uploadFail:         "Upload failed, please retry",
+        // Multi-select picker
+        pickerNextBtn:      "Next: Upload Credentials",
+        pickerSelectHint:   "Select one or more, then click Next to upload credentials.json once",
+        // Success
+        successTitle:       "Import Successful ✓",
+        successEnabled:     "The following platforms have been enabled:",
+        successReady:       "The following platforms are ready:",
+        successNone:        "No new platforms detected",
+        successHintNew:     "Data will be fetched in the background and should appear on the dashboard within seconds.",
+        successHintNone:    "If your target platform is missing, make sure the exported credentials.json contains its cookies and headers.",
+        finishBtn:          "Done",
+        // Reimport
+        reimportTitle:      "Re-import Credentials",
+        reimportDesc:       "Uploading a new credentials.json will overwrite current credentials and refresh data automatically.",
+        // Platform confirm step
+        confirmTitle:       "Confirm platforms to enable",
+        confirmDesc:        "The following platforms were detected in the JSON. Select the ones you want enabled. Previously removed platforms are unchecked by default.",
+        confirmHintRemoved: "previously removed",
+        confirmHintActive:  "currently active",
+        confirmHintNew:     "new",
+        confirmBtn:         "Confirm & Import",
+        confirmNoneWarn:    "Please select at least one platform",
+        // Remove
+        removeTitle:        "Remove Platform",
+        removeConfirm:      "Are you sure you want to remove",
+        removeConfirm2:     "from the dashboard?",
+        removeBtn:          "Confirm Remove",
+        cancelBtn:          "Cancel",
+        // Details
+        detailsSuffix:      " Details",
+        // Guide texts
+        guideVisitClaude:   "Open Claude usage page in Chrome (extension auto-captures Usage headers)",
+        guideVisitKimi:     "Open Kimi in Chrome and log in",
+        guideVisitTrae:     "Visit Trae account/usage page (extension auto-captures Entitlement headers)",
+        guideVisitMinimax:  "Visit MiniMax platform home (extension auto-captures Auth headers)",
+        guideVisitDeepseek: "Visit DeepSeek usage page and wait a few seconds (triggers all 3 APIs)",
+        guideCodexDesc:     "Server reads Codex App's local disk cache — <strong>no manual setup needed</strong>.",
+        guideCodexNote:     "Requires Codex App to be installed and opened at least once (so the cache exists).",
+        guideCodexDl:       "Download Codex App",
+        guideAntigravityDesc: "Fetches Google Antigravity usage via local Language Server — <strong>no manual setup needed</strong>.",
+        guideAntigravityNote: "Keep the Antigravity App running while viewing usage.",
+        unitTimes:          "times",
+      },
+    };
+
+    // Current language — persisted in localStorage
+    let lang = localStorage.getItem("dashboard_lang") || "zh";
+    function t(key) { return I18N[lang][key] ?? I18N["zh"][key] ?? key; }
+
+    function applyLang() {
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      document.title = t("pageTitle");
+      document.getElementById("headerTitle").textContent = t("headerTitle");
+      document.getElementById("btnRefresh").textContent  = t("btnRefresh");
+      document.getElementById("btnLang").textContent     = t("btnLang");
+      const btnAddSpan = document.getElementById("btnAddText");
+      if (btnAddSpan) btnAddSpan.textContent = " " + t("btnAdd");
+      document.getElementById("emptyTitle").textContent    = t("emptyTitle");
+      document.getElementById("emptySubtitle").textContent = t("emptySubtitle");
+      document.getElementById("btnAddEmptyText").textContent = t("btnAddEmpty");
+    }
+
+    // ── Constants ──────────────────────────────────────────────────────────────
+
+    const PLATFORM_ORDER = ["claude", "codex", "antigravity", "kimi", "minimax", "trae", "deepseek"];
+
+    const LOGOS = {
+      claude:      "/assets/claude.png",
+      codex:       "/assets/codex.png",
+      antigravity: "/assets/Antigravity.png",
+      kimi:        "/assets/kimi.png",
+      minimax:     "/assets/minimax.png",
+      trae:        "/assets/trae.png",
+      deepseek:    "/assets/deepseek.png",
+    };
+
+    // Per-platform setup guide data (text pulled dynamically from i18n)
+    function getGuides() {
+      return {
+        claude: {
+          type: "cookie_header",
+          visitUrl:  "https://claude.ai/settings/usage",
+          visitText: t("guideVisitClaude"),
+        },
+        codex: {
+          type: "local_app",
+          desc: t("guideCodexDesc"),
+          note: t("guideCodexNote"),
+          downloadUrl:  "https://github.com/openai/codex/releases",
+          downloadText: t("guideCodexDl"),
+        },
+        antigravity: {
+          type: "local_app",
+          desc: t("guideAntigravityDesc"),
+          note: t("guideAntigravityNote"),
+          downloadUrl:  null,
+          downloadText: null,
+        },
+        kimi: {
+          type: "cookie",
+          visitUrl:  "https://www.kimi.com",
+          visitText: t("guideVisitKimi"),
+        },
+        trae: {
+          type: "cookie_header",
+          visitUrl:  "https://www.trae.ai/profile",
+          visitText: t("guideVisitTrae"),
+        },
+        minimax: {
+          type: "cookie_header",
+          visitUrl:  "https://platform.minimaxi.com",
+          visitText: t("guideVisitMinimax"),
+        },
+        deepseek: {
+          type: "cookie_header",
+          visitUrl:  "https://platform.deepseek.com/usage",
+          visitText: t("guideVisitDeepseek"),
+        },
+      };
+    }
+
+    // ── State ──────────────────────────────────────────────────────────────────
+
+    let allPlatforms   = [];   // from GET /api/platforms
+    let latestResults  = [];   // from GET /api/usage
+    let refreshTimer   = null;
+    let modalScreen    = null; // 'picker' | 'setup' | 'success' | 'details'
+    let setupTarget    = null; // platform id in setup wizard
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+
+    async function init() {
+      await loadPlatforms();
+      const enabled = allPlatforms.filter(p => p.enabled);
+      if (enabled.length === 0) {
+        showEmptyState();
+      } else {
+        await loadUsage();
+        startRefreshTimer();
+      }
+    }
+
+    async function loadPlatforms() {
+      try {
+        const r = await fetch("/api/platforms");
+        allPlatforms = await r.json();
+      } catch(e) {
+        allPlatforms = [];
+      }
+    }
+
+    async function loadUsage(force = false) {
+      document.getElementById("btnRefresh").disabled = true;
+      document.getElementById("status").textContent = force ? t("statusRefreshing") : t("statusLoading");
+      try {
+        const r = await fetch(force ? "/api/refresh" : "/api/usage", {
+          method: force ? "POST" : "GET",
+        });
+        latestResults = await r.json();
+        latestResults.sort((a, b) =>
+          PLATFORM_ORDER.indexOf(a.platform) - PLATFORM_ORDER.indexOf(b.platform)
+        );
+        renderGrid();
+        document.getElementById("status").textContent =
+          `${t("statusUpdated")} ${new Date().toLocaleTimeString()}`;
+      } catch(e) {
+        document.getElementById("status").textContent = t("statusFailed");
+      }
+      document.getElementById("btnRefresh").disabled = false;
+    }
+
+    function startRefreshTimer() {
+      clearInterval(refreshTimer);
+      refreshTimer = setInterval(() => loadUsage(), 30000);
+    }
+
+    // ── Layout helpers ─────────────────────────────────────────────────────────
+
+    function showEmptyState() {
+      document.getElementById("emptyState").classList.remove("hidden");
+      document.getElementById("emptyState").classList.add("flex");
+      document.getElementById("grid").innerHTML = "";
+      document.getElementById("btnRefresh").disabled = true;
+      document.getElementById("status").textContent = t("statusNone");
+    }
+
+    function hideEmptyState() {
+      document.getElementById("emptyState").classList.add("hidden");
+      document.getElementById("emptyState").classList.remove("flex");
+      document.getElementById("btnRefresh").disabled = false;
+    }
+
+    // ── Card rendering ─────────────────────────────────────────────────────────
+
+    const ANTIGRAVITY_ORDER = [
+      "Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (Medium)",
+      "Gemini 3.1 Pro (High)",   "Gemini 3.1 Pro (Low)",
+      "Claude Opus 4.6 (Thinking)", "Claude Sonnet 4.6 (Thinking)",
+      "GPT-OSS 120B (Medium)",
+    ];
+
+    function orderedMetrics(result) {
+      if (result.platform !== "antigravity") return result.metrics;
+      return [...result.metrics].sort((a, b) => {
+        const ai = ANTIGRAVITY_ORDER.indexOf(a.label);
+        const bi = ANTIGRAVITY_ORDER.indexOf(b.label);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      });
+    }
+
+    function pct(m) {
+      if (m.unit === "%" && m.total === 100) return m.used;
+      if (m.total) return (m.used / m.total) * 100;
+      return 0;
+    }
+
+    function barColor(v) {
+      if (v >= 95) return "bg-red-500";
+      if (v >= 80) return "bg-amber-400";
+      return "bg-emerald-400";
+    }
+
+    function fmtValue(m) {
+      if (m.unit === "$")       return m.total == null ? `+$${(+m.used).toFixed(2)}` : `$${(+m.used).toFixed(2)} / $${(+m.total).toFixed(2)}`;
+      if (m.unit === "CNY")     return `¥${(+m.used).toFixed(2)} CNY`;
+      if (m.unit === "次")      return `${(+m.used).toLocaleString()} 次`;
+      if (m.unit === "tokens")  return `${(+m.used).toLocaleString()} tokens`;
+      if (m.unit === "credits") return `${(+m.used).toLocaleString()} credits`;
+      if (m.total && m.total !== 100) return `${(+m.used).toFixed(0)} / ${(+m.total).toFixed(0)}`;
+      return `${(+m.used).toFixed(1)}%`;
+    }
+
+    function resetTxt(v) {
+      if (!v) return "";
+      const d = new Date(v);
+      return isNaN(d) ? "" : `${t("resetPrefix")} ${d.toLocaleString()}`;
+    }
+
+    // ── Metric label translation ────────────────────────────────────────────────
+    // Server always returns Chinese labels; map them to English when lang === "en".
+
+    const LABEL_ZH_TO_EN = {
+      "5小时用量":  "5-hour Usage",
+      "本周用量":   "Weekly Usage",
+      "充值余额":   "Balance",
+      "本月消费":   "Monthly Spend",
+    };
+
+    // Dynamic suffix replacements for labels like "GPT-4o 请求次数"
+    const LABEL_SUFFIX_ZH_TO_EN = [
+      ["请求次数", "Requests"],
+    ];
+
+    function translateLabel(label) {
+      if (lang !== "en") return label;
+      if (LABEL_ZH_TO_EN[label]) return LABEL_ZH_TO_EN[label];
+      for (const [zh, en] of LABEL_SUFFIX_ZH_TO_EN) {
+        if (label.endsWith(zh)) return label.slice(0, -zh.length) + en;
+      }
+      return label; // already English (Basic, Bonus, AI Credits, model names…)
+    }
+
+    function metricHtml(m) {
+      const v = Math.max(0, Math.min(100, pct(m)));
+      return `
+        <div class="space-y-2">
+          <div class="flex items-baseline justify-between gap-3">
+            <span class="text-sm text-zinc-300">${translateLabel(m.label)}</span>
+            <span class="text-sm font-semibold text-zinc-50">${fmtValue(m)}</span>
+          </div>
+          ${m.total != null ? `
+            <div class="relative h-2 overflow-hidden rounded-sm bg-zinc-800">
+              <div class="h-full ${barColor(v)}" style="width:${v}%"></div>
+            </div>` : ""}
+          <div class="min-h-5 text-xs text-zinc-500">${resetTxt(m.reset_time)}</div>
+        </div>`;
+    }
+
+    function cardHtml(result) {
+      // For platforms with many metrics, show a subset + "View" button
+      const hasDetails =
+        (result.platform === "deepseek" && result.metrics.some(m => m.unit === "次" || m.unit === "tokens")) ||
+        (result.platform === "antigravity" && result.metrics.length > 2);
+
+      const detailsBtn = hasDetails ? `
+        <button class="ml-auto inline-flex h-9 items-center rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
+          type="button" onclick="openDetails('${result.platform}')">${t("cardViewBtn")}</button>` : "";
+
+      // Which metrics to show in card preview
+      let previewMetrics;
+      if (result.platform === "deepseek") {
+        previewMetrics = result.metrics.filter(m => m.unit !== "次" && m.unit !== "tokens");
+      } else if (result.platform === "antigravity") {
+        const all = orderedMetrics(result);
+        const featured = all.filter(m => m.label.includes("Flash"));
+        previewMetrics = featured.length ? featured : all.slice(0, 2);
+      } else {
+        previewMetrics = result.metrics;
+      }
+
+      const errorHtml = result.error
+        ? `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">${result.error}</div>`
+        : "";
+
+      // Determine if this platform needs JSON import (not local_app)
+      const platformInfo = allPlatforms.find(p => p.id === result.platform);
+      const needsImport = platformInfo && platformInfo.type !== "local_app";
+
+      return `
+        <article class="group relative rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+          <!-- Hover action buttons (top-right) -->
+          <div class="absolute right-3 top-3 hidden items-center gap-1.5 group-hover:inline-flex">
+            ${needsImport ? `
+            <button
+              onclick="openReimport('${result.platform}', '${result.display_name}')"
+              class="h-6 inline-flex items-center justify-center rounded-md border border-zinc-700
+                     px-1.5 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-400"
+              type="button" title="${t('cardReimportTitle')}">↑</button>` : ''}
+            <button
+              onclick="confirmRemove('${result.platform}', '${result.display_name}')"
+              class="h-6 w-6 inline-flex items-center justify-center rounded-md
+                     border border-zinc-700 text-xs text-zinc-500 hover:border-red-700 hover:text-red-400"
+              type="button" title="${t('cardRemoveTitle')}">✕</button>
+          </div>
+
+          <!-- Card header -->
+          <div class="mb-4 flex items-start gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <img class="h-9 w-9 rounded-md bg-zinc-800 object-cover" src="${LOGOS[result.platform] || ''}" alt="" />
+              <div class="min-w-0">
+                <h2 class="truncate text-base font-semibold">${result.display_name}</h2>
+                <p class="text-xs text-zinc-500">${new Date(result.last_updated).toLocaleString()}</p>
+              </div>
+            </div>
+            ${detailsBtn}
+          </div>
+
+          <!-- Metrics -->
+          <div class="space-y-4">
+            ${errorHtml}
+            ${previewMetrics.length ? previewMetrics.map(metricHtml).join("") : (!result.error ? `<p class="text-sm text-zinc-400">${t("cardNoData")}</p>` : '')}
+          </div>
+        </article>`;
+    }
+
+    function renderGrid() {
+      const enabled = allPlatforms.filter(p => p.enabled).map(p => p.id);
+      if (enabled.length === 0) { showEmptyState(); return; }
+
+      hideEmptyState();
+      const grid = document.getElementById("grid");
+      grid.innerHTML = latestResults.map(cardHtml).join("");
+    }
+
+    // ── Details modal (for deepseek / antigravity extra metrics) ───────────────
+
+    function openDetails(platform) {
+      const result = latestResults.find(r => r.platform === platform);
+      if (!result) return;
+      modalScreen = "details";
+      openModal(result.display_name + t("detailsSuffix"));
+      document.getElementById("modalBack").classList.add("hidden");
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-4">
+          ${orderedMetrics(result).map(metricHtml).join("")}
+        </div>`;
+    }
+
+    // ── Remove confirmation ────────────────────────────────────────────────────
+
+    function confirmRemove(platformId, displayName) {
+      modalScreen = "confirm_remove";
+      openModal(t("removeTitle"));
+      document.getElementById("modalBack").classList.add("hidden");
+      document.getElementById("modalBody").innerHTML = `
+        <p class="text-zinc-300 mb-6">${t("removeConfirm")} <strong>${displayName}</strong>${t("removeConfirm2")}</p>
+        <div class="flex gap-3">
+          <button onclick="removePlatform('${platformId}')"
+            class="flex-1 rounded-md bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-500">
+            ${t("removeBtn")}</button>
+          <button onclick="closeModal()"
+            class="flex-1 rounded-md border border-zinc-700 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-900">
+            ${t("cancelBtn")}</button>
+        </div>`;
+    }
+
+    async function removePlatform(platformId) {
+      await fetch(`/api/platforms/${platformId}`, { method: "DELETE" });
+      closeModal();
+      await loadPlatforms();
+      const enabled = allPlatforms.filter(p => p.enabled);
+      if (enabled.length === 0) { showEmptyState(); }
+      else { await loadUsage(); }
+    }
+
+    // ── Platform picker (multi-select) ─────────────────────────────────────────
+
+    // Track which plugin-based platforms are selected in the picker
+    let pickerSelected = new Set();
+
+    function openPlatformPicker() {
+      modalScreen = "picker";
+      pickerSelected = new Set();
+      openModal(t("modalPickerTitle"));
+      document.getElementById("modalBack").classList.add("hidden");
+      renderPickerBody();
+    }
+
+    function renderPickerBody() {
+      const enabledIds  = new Set(allPlatforms.filter(p => p.enabled).map(p => p.id));
+      const localApps   = allPlatforms.filter(p => p.type === "local_app");
+      const needsPlugin = allPlatforms.filter(p => p.type !== "local_app");
+
+      function localCard(p) {
+        const already = enabledIds.has(p.id);
+        return `
+          <button type="button"
+            onclick="${already ? '' : `openSetupWizard('${p.id}')`}"
+            ${already ? 'disabled' : ''}
+            class="flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition
+              ${already
+                ? 'border-zinc-700 opacity-40 cursor-not-allowed'
+                : 'border-zinc-700 hover:border-indigo-500 hover:bg-zinc-900 cursor-pointer'}">
+            <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
+            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+            ${already ? `<span class="text-xs text-zinc-500">${t("platformAdded")}</span>` : ''}
+          </button>`;
+      }
+
+      function pluginCard(p) {
+        const already   = enabledIds.has(p.id);
+        const selected  = pickerSelected.has(p.id);
+        if (already) {
+          return `
+            <div class="flex flex-col items-center gap-2 rounded-lg border border-zinc-700 p-3 text-center opacity-40 cursor-not-allowed">
+              <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
+              <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+              <span class="text-xs text-zinc-500">${t("platformAdded")}</span>
+            </div>`;
+        }
+        return `
+          <button type="button" onclick="togglePickerSelect('${p.id}')"
+            class="relative flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition cursor-pointer
+              ${selected
+                ? 'border-indigo-500 bg-indigo-950/40 ring-1 ring-indigo-500'
+                : 'border-zinc-700 hover:border-indigo-400 hover:bg-zinc-900'}">
+            ${selected ? `<span class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-white text-[10px] font-bold">✓</span>` : ''}
+            <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
+            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+          </button>`;
+      }
+
+      const anySelected = pickerSelected.size > 0;
+
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+          <div>
+            <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">${t("modalLocalSection")}</p>
+            <div class="grid grid-cols-3 gap-3">${localApps.map(localCard).join("")}</div>
+          </div>
+          <div>
+            <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">${t("modalPluginSection")}</p>
+            <p class="mb-3 text-xs text-zinc-500">${t("pickerSelectHint")}</p>
+            <div class="grid grid-cols-3 gap-3">${needsPlugin.map(pluginCard).join("")}</div>
+          </div>
+          ${anySelected ? `
+          <div class="pt-1">
+            <button type="button" onclick="openBatchSetup()"
+              class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+              ${t("pickerNextBtn")} (${pickerSelected.size})
+            </button>
+          </div>` : ''}
+        </div>`;
+    }
+
+    function togglePickerSelect(platformId) {
+      if (pickerSelected.has(platformId)) {
+        pickerSelected.delete(platformId);
+      } else {
+        pickerSelected.add(platformId);
+      }
+      renderPickerBody();
+    }
+
+    // Batch setup: show a single upload UI for all selected plugin platforms
+    function openBatchSetup() {
+      if (pickerSelected.size === 0) return;
+      modalScreen = "batch_setup";
+      openModal(t("step3Title"));
+      document.getElementById("modalBack").classList.remove("hidden");
+      renderBatchUploadBody();
+    }
+
+    function renderBatchUploadBody() {
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+          <p class="text-sm text-zinc-400">${t("reimportDesc")}</p>
+          <!-- Drop zone -->
+          <div id="dropZone"
+            class="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed
+                   border-zinc-700 bg-zinc-900/40 px-4 py-8 text-center
+                   hover:border-indigo-500 hover:bg-zinc-900/70 transition cursor-pointer"
+            onclick="document.getElementById('fileInput').click()"
+            ondragover="event.preventDefault(); this.classList.add('border-indigo-500')"
+            ondragleave="this.classList.remove('border-indigo-500')"
+            ondrop="handleDrop(event)">
+            <div class="text-2xl opacity-40">📂</div>
+            <p class="text-sm text-zinc-400">${t("dropText")}</p>
+            <p class="text-xs text-zinc-600">${t("dropOr")}</p>
+            <input id="fileInput" type="file" accept=".json,application/json" class="hidden"
+              onchange="handleFileSelect(event)" />
+          </div>
+          <div id="uploadResult" class="mt-3"></div>
+        </div>`;
+    }
+
+    // ── Setup wizard ───────────────────────────────────────────────────────────
+
+    function openSetupWizard(platformId) {
+      setupTarget = platformId;
+      modalScreen = "setup";
+      const guides = getGuides();
+      const guide = guides[platformId] || {};
+      const p = allPlatforms.find(x => x.id === platformId);
+      openModal(`${lang === "zh" ? "添加" : "Add"} ${p ? p.display_name : platformId}`);
+      document.getElementById("modalBack").classList.remove("hidden");
+
+      if (guide.type === "local_app") {
+        renderLocalAppSetup(platformId, guide);
+      } else {
+        renderPluginSetup(platformId, guide);
+      }
+    }
+
+    function renderLocalAppSetup(platformId, guide) {
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+          <div class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm leading-relaxed text-zinc-300">
+            <p>${guide.desc}</p>
+            ${guide.note ? `<p class="mt-2 text-zinc-400">${guide.note}</p>` : ''}
+          </div>
+          ${guide.downloadUrl ? `
+            <a href="${guide.downloadUrl}" target="_blank"
+               class="inline-flex items-center gap-1.5 text-sm text-indigo-400 hover:text-indigo-300">
+              ${guide.downloadText} ↗
+            </a>` : ''}
+          <div id="detectResult"></div>
+          <button id="btnDetect" type="button" onclick="detectLocalApp('${platformId}')"
+            class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+            ${t("detectBtn")}
+          </button>
+        </div>`;
+    }
+
+    async function detectLocalApp(platformId) {
+      const btn = document.getElementById("btnDetect");
+      const result = document.getElementById("detectResult");
+      btn.disabled = true;
+      btn.textContent = t("detectingBtn");
+      try {
+        const r = await fetch(`/api/platforms/${platformId}/detect`, { method: "POST" });
+        if (r.ok) {
+          await loadPlatforms();
+          showSetupSuccess([platformId]);
+        } else {
+          const err = await r.json();
+          result.innerHTML = `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">${err.detail}</div>`;
+          btn.disabled = false;
+          btn.textContent = t("redetectBtn");
+        }
+      } catch(e) {
+        result.innerHTML = `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">${t("detectFail")}</div>`;
+        btn.disabled = false;
+        btn.textContent = t("redetectBtn");
+      }
+    }
+
+    function renderPluginSetup(platformId, guide) {
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+
+          <!-- Step 1: Install extension -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">1</div>
+            <div class="pt-0.5">
+              <p class="text-sm font-medium text-zinc-200">${t("step1Title")}</p>
+              <p class="mt-1 text-xs text-zinc-500">${t("step1Desc")}</p>
+            </div>
+          </div>
+
+          <!-- Step 2: Visit platform -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">2</div>
+            <div class="pt-0.5">
+              <p class="text-sm font-medium text-zinc-200">${t("step2Title")}</p>
+              <a href="${guide.visitUrl}" target="_blank"
+                 class="mt-1 inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                ${guide.visitText} ↗
+              </a>
+            </div>
+          </div>
+
+          <!-- Step 3: Export & upload -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">3</div>
+            <div class="w-full pt-0.5">
+              <p class="text-sm font-medium text-zinc-200">${t("step3Title")}</p>
+              <p class="mb-3 mt-1 text-xs text-zinc-500">${t("step3Desc")}</p>
+
+              <!-- Drop zone -->
+              <div id="dropZone"
+                class="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed
+                       border-zinc-700 bg-zinc-900/40 px-4 py-8 text-center
+                       hover:border-indigo-500 hover:bg-zinc-900/70 transition cursor-pointer"
+                onclick="document.getElementById('fileInput').click()"
+                ondragover="event.preventDefault(); this.classList.add('border-indigo-500')"
+                ondragleave="this.classList.remove('border-indigo-500')"
+                ondrop="handleDrop(event)">
+                <div class="text-2xl opacity-40">📂</div>
+                <p class="text-sm text-zinc-400">${t("dropText")}</p>
+                <p class="text-xs text-zinc-600">${t("dropOr")}</p>
+                <input id="fileInput" type="file" accept=".json,application/json" class="hidden"
+                  onchange="handleFileSelect(event)" />
+              </div>
+
+              <div id="uploadResult" class="mt-3"></div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Re-import existing platform ─────────────────────────────────────────────
+
+    function openReimport(platformId, displayName) {
+      modalScreen = "reimport";
+      setupTarget = platformId;
+      openModal(t("reimportTitle"));
+      document.getElementById("modalBack").classList.add("hidden");
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+          <div class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-300">
+            <p class="font-medium mb-1">${displayName}</p>
+            <p class="text-zinc-400">${t("reimportDesc")}</p>
+          </div>
+
+          <!-- Drop zone -->
+          <div id="dropZone"
+            class="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed
+                   border-zinc-700 bg-zinc-900/40 px-4 py-8 text-center
+                   hover:border-indigo-500 hover:bg-zinc-900/70 transition cursor-pointer"
+            onclick="document.getElementById('fileInput').click()"
+            ondragover="event.preventDefault(); this.classList.add('border-indigo-500')"
+            ondragleave="this.classList.remove('border-indigo-500')"
+            ondrop="handleDrop(event)">
+            <div class="text-2xl opacity-40">📂</div>
+            <p class="text-sm text-zinc-400">${t("dropText")}</p>
+            <p class="text-xs text-zinc-600">${t("dropOr")}</p>
+            <input id="fileInput" type="file" accept=".json,application/json" class="hidden"
+              onchange="handleFileSelect(event)" />
+          </div>
+          <div id="uploadResult"></div>
+        </div>`;
+    }
+
+    // ── File upload ────────────────────────────────────────────────────────────
+
+    // Holds the pending File object between the "detect" and "confirm" steps
+    let pendingCredFile = null;
+
+    function handleDrop(event) {
+      event.preventDefault();
+      document.getElementById("dropZone").classList.remove("border-indigo-500");
+      const file = event.dataTransfer.files[0];
+      if (file) readAndConfirmCredentials(file);
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (file) readAndConfirmCredentials(file);
+    }
+
+    /**
+     * Step 1 — Read the JSON client-side, detect platforms, show confirmation UI.
+     */
+    async function readAndConfirmCredentials(file) {
+      const resultEl = document.getElementById("uploadResult");
+      resultEl.innerHTML = `<p class="text-sm text-zinc-400">${t("importing")}</p>`;
+
+      let data;
+      try {
+        const text = await file.text();
+        data = JSON.parse(text);
+      } catch(e) {
+        resultEl.innerHTML = `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">JSON 格式错误</div>`;
+        return;
+      }
+
+      const foundInJson = detectPlatformsInJson(data);
+      if (foundInJson.size === 0) {
+        // Nothing recognisable → skip selection, upload directly
+        pendingCredFile = file;
+        await doUploadCredentials(file, null);
+        return;
+      }
+
+      pendingCredFile = file;
+      showPlatformConfirmStep(foundInJson);
+    }
+
+    /**
+     * Step 2 — Render the platform-selection confirmation UI inside the modal body.
+     * Called after detecting which platforms are in the JSON.
+     *
+     * Two distinct modes:
+     *
+     * A) Picker flow (pickerSelected is non-empty):
+     *    Show ONLY platforms the user explicitly chose in the picker.
+     *    All of them are pre-checked. Platforms not in pickerSelected are
+     *    never shown, even if their cookies exist in the JSON.
+     *
+     * B) Re-import flow (pickerSelected is empty):
+     *    Show everything found in the JSON.
+     *    Pre-check: enabled (being refreshed) + new platforms not in removed list.
+     *    Previously removed platforms are unchecked by default.
+     */
+    function showPlatformConfirmStep(foundInJson) {
+      const enabledIds = new Set(allPlatforms.filter(p => p.enabled).map(p => p.id));
+      const removedIds = new Set(allPlatforms.filter(p => p.removed).map(p => p.id));
+
+      let platforms;
+      let defaultChecked;
+
+      if (pickerSelected.size > 0) {
+        // Picker flow: only show what the user deliberately selected
+        platforms = allPlatforms.filter(p => pickerSelected.has(p.id) && foundInJson.has(p.id));
+        // Default = all selected (user already made the choice in the picker)
+        defaultChecked = new Set(platforms.map(p => p.id));
+      } else {
+        // Re-import flow: show everything in the JSON
+        platforms = allPlatforms.filter(p => foundInJson.has(p.id));
+        // Pre-check: already enabled OR not previously removed
+        defaultChecked = new Set(
+          platforms.filter(p => enabledIds.has(p.id) || !removedIds.has(p.id)).map(p => p.id)
+        );
+      }
+
+      // _confirmSelected is the live state toggled by user clicks
+      window._confirmSelected = new Set(defaultChecked);
+
+      renderConfirmList(platforms, enabledIds, removedIds);
+      document.getElementById("modalTitle").textContent = t("confirmTitle");
+    }
+
+    /** Renders (or re-renders) the confirm list using the current _confirmSelected state. */
+    function renderConfirmList(platforms, enabledIds, removedIds) {
+      // If called after initial render, look up cached sets from DOM data attributes
+      if (!platforms) {
+        const listEl = document.getElementById("confirmList");
+        if (!listEl) return;
+        platforms = JSON.parse(listEl.dataset.platforms || "[]")
+          .map(id => allPlatforms.find(p => p.id === id))
+          .filter(Boolean);
+        enabledIds = new Set(allPlatforms.filter(p => p.enabled).map(p => p.id));
+        removedIds = new Set(allPlatforms.filter(p => p.removed).map(p => p.id));
+      }
+
+      function platformRow(p) {
+        const checked = window._confirmSelected.has(p.id);
+        let hint = t("confirmHintNew");
+        let hintColor = "text-zinc-500";
+        if (removedIds.has(p.id))       { hint = t("confirmHintRemoved"); hintColor = "text-amber-500"; }
+        else if (enabledIds.has(p.id))  { hint = t("confirmHintActive");  hintColor = "text-emerald-500"; }
+
+        return `
+          <div onclick="toggleConfirmSelect('${p.id}')" role="checkbox" aria-checked="${checked}"
+            class="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition select-none
+              ${checked ? 'border-indigo-500 bg-indigo-950/30' : 'border-zinc-700 hover:border-zinc-600'}">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded border
+              ${checked ? 'border-indigo-500 bg-indigo-500' : 'border-zinc-600 bg-transparent'}">
+              ${checked ? '<svg viewBox="0 0 12 12" class="h-3 w-3 text-white"><polyline points="1,6 4,10 11,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+            </span>
+            <img src="${LOGOS[p.id] || ''}" class="h-6 w-6 rounded bg-zinc-800 object-cover" alt="" />
+            <span class="flex-1 text-sm font-medium text-zinc-200">${p.display_name}</span>
+            <span class="text-xs ${hintColor}">${hint}</span>
+          </div>`;
+      }
+
+      const listEl = document.getElementById("confirmList");
+      if (listEl) {
+        // Already rendered container — just update the rows
+        listEl.innerHTML = platforms.map(platformRow).join("");
+        listEl.dataset.platforms = JSON.stringify(platforms.map(p => p.id));
+      } else {
+        // First render — build the whole modal body
+        document.getElementById("modalBody").innerHTML = `
+          <div class="space-y-4">
+            <p class="text-sm text-zinc-400">${t("confirmDesc")}</p>
+            <div id="confirmList" class="space-y-2" data-platforms='${JSON.stringify(platforms.map(p => p.id))}'>
+              ${platforms.map(platformRow).join("")}
+            </div>
+            <div id="confirmWarn" class="hidden">
+              <p class="text-xs text-amber-400">${t("confirmNoneWarn")}</p>
+            </div>
+            <button type="button" onclick="submitConfirmedImport()"
+              class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+              ${t("confirmBtn")}
+            </button>
+          </div>`;
+      }
+    }
+
+    function toggleConfirmSelect(platformId) {
+      // Toggle in the live Set — this is the single source of truth
+      if (window._confirmSelected.has(platformId)) {
+        window._confirmSelected.delete(platformId);
+      } else {
+        window._confirmSelected.add(platformId);
+      }
+      // Re-render rows only (not the whole modal body)
+      renderConfirmList(null);
+      document.getElementById("confirmWarn")?.classList.add("hidden");
+    }
+
+    /**
+     * Step 3 — User confirmed selection → upload with enable_only.
+     */
+    async function submitConfirmedImport() {
+      if (window._confirmSelected.size === 0) {
+        document.getElementById("confirmWarn")?.classList.remove("hidden");
+        return;
+      }
+      if (!pendingCredFile) return;
+      await doUploadCredentials(pendingCredFile, [...window._confirmSelected]);
+    }
+
+    /**
+     * Core upload — sends file + optional enable_only list to server.
+     */
+    async function doUploadCredentials(file, enableOnly) {
+      // Show a simple loading state (may have replaced modal body already)
+      const modalBody = document.getElementById("modalBody");
+      modalBody.innerHTML = `<p class="text-sm text-zinc-400 py-4 text-center">${t("importing")}</p>`;
+      document.getElementById("modalTitle").textContent = t("importing").replace("…","");
+
+      const formData = new FormData();
+      formData.append("file", file);
+      if (enableOnly !== null) {
+        formData.append("enable_only", enableOnly.join(","));
+      }
+
+      try {
+        const r = await fetch("/api/credentials/import", { method: "POST", body: formData });
+        if (!r.ok) {
+          const err = await r.json();
+          modalBody.innerHTML = `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">${err.detail}</div>`;
+          return;
+        }
+        const data = await r.json();
+        await loadPlatforms();
+        showSetupSuccess(data.newly_enabled, data.ready_platforms || []);
+      } catch(e) {
+        modalBody.innerHTML = `<div class="rounded-md border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">${t("uploadFail")}</div>`;
+      }
+    }
+
+    // ── Setup success screen ───────────────────────────────────────────────────
+
+    function showSetupSuccess(newlyEnabled, readyPlatforms = []) {
+      modalScreen = "success";
+      openModal(t("successTitle"));
+      document.getElementById("modalBack").classList.add("hidden");
+
+      const displayIds = newlyEnabled.length ? newlyEnabled : readyPlatforms;
+      const names = displayIds.map(id => {
+        const p = allPlatforms.find(x => x.id === id);
+        return p ? p.display_name : id;
+      });
+      const title = newlyEnabled.length ? t("successEnabled") :
+        (names.length ? t("successReady") : t("successNone"));
+      const hint = newlyEnabled.length ? t("successHintNew") : t("successHintNone");
+
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-5">
+          <div class="rounded-lg border border-emerald-900/50 bg-emerald-950/30 p-4">
+            <p class="text-sm font-semibold text-emerald-300 mb-2">${title}</p>
+            <ul class="space-y-1">
+              ${names.map(n => `<li class="flex items-center gap-2 text-sm text-emerald-200"><span class="text-emerald-400">✓</span> ${n}</li>`).join("")}
+            </ul>
+          </div>
+          <p class="text-xs text-zinc-500">${hint}</p>
+          <button type="button" onclick="finishSetup()"
+            class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+            ${t("finishBtn")}
+          </button>
+        </div>`;
+    }
+
+    async function finishSetup() {
+      closeModal();
+      await loadPlatforms();
+      hideEmptyState();
+      // Wait briefly for background refresh tasks to populate cache, then reload
+      setTimeout(() => loadUsage(), 1500);
+    }
+
+    // ── Modal helpers ──────────────────────────────────────────────────────────
+
+    function openModal(title) {
+      document.getElementById("modalTitle").textContent = title;
+      document.getElementById("modal").classList.remove("hidden");
+    }
+
+    function closeModal() {
+      document.getElementById("modal").classList.add("hidden");
+      modalScreen = null;
+      setupTarget = null;
+    }
+
+    // ── Event wiring ───────────────────────────────────────────────────────────
+
+    document.getElementById("btnAdd").addEventListener("click", async () => {
+      await loadPlatforms();
+      openPlatformPicker();
+    });
+    document.getElementById("btnAddEmpty").addEventListener("click", async () => {
+      await loadPlatforms();
+      openPlatformPicker();
+    });
+    document.getElementById("btnRefresh").addEventListener("click", () => loadUsage(true));
+
+    document.getElementById("modalClose").addEventListener("click", closeModal);
+    document.getElementById("modalBackdrop").addEventListener("click", closeModal);
+
+    document.getElementById("modalBack").addEventListener("click", () => {
+      if (modalScreen === "setup")       openPlatformPicker();
+      else if (modalScreen === "success") openPlatformPicker();
+      else if (modalScreen === "batch_setup") openPlatformPicker();
+    });
+
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+    // Language toggle
+    document.getElementById("btnLang").addEventListener("click", () => {
+      lang = lang === "zh" ? "en" : "zh";
+      localStorage.setItem("dashboard_lang", lang);
+      applyLang();
+      // Re-render dynamic content that's currently visible
+      const enabled = allPlatforms.filter(p => p.enabled);
+      if (enabled.length === 0) {
+        showEmptyState();
+      } else {
+        renderGrid();
+        document.getElementById("status").textContent =
+          latestResults.length
+            ? `${t("statusUpdated")} ${new Date().toLocaleTimeString()}`
+            : t("statusLoading");
+      }
+      // Re-render open modal if any
+      if (modalScreen === "picker") openPlatformPicker();
+    });
+
+    // ── Boot ───────────────────────────────────────────────────────────────────
+
+    applyLang();
+    init();
+    </script>
+  </body>
+</html>
