@@ -1,6 +1,6 @@
 # AI Usage Monitor
 
-> **macOS only** · [中文文档](README-zh.md)
+> **macOS only** · [Chinese Docs](README-zh.md)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -45,7 +45,7 @@ Open **http://localhost:8765** in your browser.
 
 ### Step 3 — Add platforms in the Dashboard
 
-The page starts empty. Click **「+ 添加平台」** (Add Platform) and pick from the modal.
+The page starts empty. Click **"+ Add Platform"** and pick from the modal.
 
 **Local App platforms (Codex, Antigravity)** — Click "Detect & Enable". The server reads data directly from the local app on disk. No configuration needed.
 
