@@ -465,7 +465,7 @@
     function fmtValue(m) {
       if (m.unit === "$")       return m.total == null ? `+$${(+m.used).toFixed(2)}` : `$${(+m.used).toFixed(2)} / $${(+m.total).toFixed(2)}`;
       if (m.unit === "CNY")     return `¥${(+m.used).toFixed(2)} CNY`;
-      if (m.unit === "次")      return `${(+m.used).toLocaleString()} 次`;
+      if (m.unit === "次")      return `${(+m.used).toLocaleString()} ${lang === "en" ? "reqs" : "次"}`;
       if (m.unit === "tokens")  return `${(+m.used).toLocaleString()} tokens`;
       if (m.unit === "credits") return `${(+m.used).toLocaleString()} credits`;
       if (m.total && m.total !== 100) return `${(+m.used).toFixed(0)} / ${(+m.total).toFixed(0)}`;
@@ -525,8 +525,8 @@
         (result.platform === "antigravity" && result.metrics.length > 2);
 
       const detailsBtn = hasDetails ? `
-        <button class="ml-auto inline-flex h-9 items-center rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-900"
-          type="button" onclick="openDetails('${result.platform}')">${t("cardViewBtn")}</button>` : "";
+        <button class="mt-4 inline-flex h-8 items-center rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          type="button" onclick="openDetails('${result.platform}')">${t("cardViewBtn")} →</button>` : "";
 
       // Which metrics to show in card preview
       let previewMetrics;
@@ -551,30 +551,28 @@
       return `
         <article class="group relative rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
           <!-- Hover action buttons (top-right) -->
-          <div class="absolute right-3 top-3 hidden items-center gap-1.5 group-hover:inline-flex">
-            ${needsImport ? `
-            <button
+          <div style="position:absolute;right:12px;top:12px;display:none;" class="card-actions items-center gap-1.5">
+            ${needsImport ? `<button
               onclick="openReimport('${result.platform}', '${result.display_name}')"
-              class="h-6 inline-flex items-center justify-center rounded-md border border-zinc-700
-                     px-1.5 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-400"
+              class="h-6 inline-flex items-center justify-center rounded-md border border-zinc-700 px-1.5 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-400"
               type="button" title="${t('cardReimportTitle')}">↑</button>` : ''}
             <button
               onclick="confirmRemove('${result.platform}', '${result.display_name}')"
-              class="h-6 w-6 inline-flex items-center justify-center rounded-md
-                     border border-zinc-700 text-xs text-zinc-500 hover:border-red-700 hover:text-red-400"
+              class="h-6 w-6 inline-flex items-center justify-center rounded-md border border-zinc-700 text-xs text-zinc-500 hover:border-red-700 hover:text-red-400"
               type="button" title="${t('cardRemoveTitle')}">✕</button>
           </div>
 
           <!-- Card header -->
-          <div class="mb-4 flex items-start gap-3">
-            <div class="flex min-w-0 items-center gap-3">
-              <img class="h-9 w-9 rounded-md bg-zinc-800 object-cover" src="${LOGOS[result.platform] || ''}" alt="" />
-              <div class="min-w-0">
-                <h2 class="truncate text-base font-semibold">${result.display_name}</h2>
-                <p class="text-xs text-zinc-500">${new Date(result.last_updated).toLocaleString()}</p>
-              </div>
+          <div class="mb-4 flex items-center gap-3">
+            <img class="h-9 w-9 rounded-md bg-zinc-800 object-cover shrink-0" src="${LOGOS[result.platform] || ''}" alt="" />
+            <div class="min-w-0">
+              <h2 class="truncate text-base font-semibold">${result.display_name}</h2>
+              <p class="text-xs text-zinc-500">${new Date(result.last_updated).toLocaleString()}</p>
             </div>
-            ${detailsBtn}
+            ${hasDetails ? `<button
+              onclick="openDetails('${result.platform}')"
+              class="ml-2 shrink-0 inline-flex h-7 items-center rounded-md border border-zinc-700 px-2.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              type="button">${t("cardViewBtn")} →</button>` : ''}
           </div>
 
           <!-- Metrics -->
@@ -592,6 +590,14 @@
       hideEmptyState();
       const grid = document.getElementById("grid");
       grid.innerHTML = latestResults.map(cardHtml).join("");
+
+      // Wire up hover visibility for card action buttons (✕ / ↑)
+      grid.querySelectorAll("article").forEach(card => {
+        const actions = card.querySelector(".card-actions");
+        if (!actions) return;
+        card.addEventListener("mouseenter", () => actions.style.display = "inline-flex");
+        card.addEventListener("mouseleave", () => actions.style.display = "none");
+      });
     }
 
     // ── Details modal (for deepseek / antigravity extra metrics) ───────────────
