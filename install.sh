@@ -22,8 +22,14 @@ echo ""
 if ! command -v python3 &>/dev/null; then
   error "Python 3 not found.\n  Install from https://python.org or via Homebrew: brew install python3"
 fi
-PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
+PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+PY_VERSION="${PY_MAJOR}.${PY_MINOR}"
 info "Python $PY_VERSION found"
+
+if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
+  error "Python 3.10 or higher is required (found $PY_VERSION).\n  Install via Homebrew: brew install python@3.13"
+fi
 
 # ── 2. Create virtualenv ─────────────────────────────────────────────────────
 if [ ! -d venv ]; then
