@@ -199,7 +199,21 @@
         guideCodexDl:       "下载 Codex App",
         guideAntigravityDesc: "通过本地 Language Server 获取 Google Antigravity 用量，<strong>无需任何手动配置</strong>。",
         guideAntigravityNote: "查看用量时需保持 Antigravity App 在运行状态。",
+        guideCursorDesc:     "服务端直接读取 Cursor App 本地的 SQLite 数据库获取登录 Token，再请求 Cursor 用量 API，<strong>无需任何手动配置</strong>。",
+        guideCursorNote:     "需要 Cursor App 已安装并至少登录过一次。",
+        guideCursorDl:       "下载 Cursor",
         unitTimes:          "次",
+        // OpenRouter
+        modalApiKeySection:    "API Key 平台",
+        orStep1Title:          "创建 Management API Key",
+        orStep1Desc:           `前往 <a href="https://openrouter.ai/settings/management-keys" target="_blank" class="text-indigo-400 hover:text-indigo-300">openrouter.ai/settings/management-keys</a> → 点击「Create New Key」→ 复制生成的密钥。`,
+        orStep1Note:           "⚠️ 请创建 Management Key，而非普通 API Key。两者页面不同，仅 Management Key 有权限读取余额和用量数据。",
+        orSecurityNote:        "🔒 此 Key 仅用于查询余额和用量，不会发起任何 AI 请求，不会消耗你的 Token 额度。",
+        orKeyPlaceholder:      "sk-or-v1-...",
+        orSaveBtn:             "保存并启用",
+        orSavingBtn:           "保存中…",
+        orKeyError:            "Key 格式错误，OpenRouter Management Key 以 sk-or- 开头",
+        orSaveError:           "保存失败，请检查 Key 是否正确",
       },
       en: {
         pageTitle:          "AI Usage Monitor",
@@ -281,7 +295,21 @@
         guideCodexDl:       "Download Codex App",
         guideAntigravityDesc: "Fetches Google Antigravity usage via local Language Server — <strong>no manual setup needed</strong>.",
         guideAntigravityNote: "Keep the Antigravity App running while viewing usage.",
+        guideCursorDesc:     "Server reads Cursor App's local SQLite database to get your session token, then calls the Cursor usage API — <strong>no manual setup needed</strong>.",
+        guideCursorNote:     "Requires Cursor App to be installed and signed in at least once.",
+        guideCursorDl:       "Download Cursor",
         unitTimes:          "times",
+        // OpenRouter
+        modalApiKeySection:    "API Key Platforms",
+        orStep1Title:          "Create a Management API Key",
+        orStep1Desc:           `Go to <a href="https://openrouter.ai/settings/management-keys" target="_blank" class="text-indigo-400 hover:text-indigo-300">openrouter.ai/settings/management-keys</a> → click "Create New Key" → copy the key.`,
+        orStep1Note:           "⚠️ You need a Management Key, not a regular API Key. They are on separate pages — only a Management Key can read balance and usage data.",
+        orSecurityNote:        "🔒 This key is used only to read your balance and usage. It will never make AI requests or consume any of your token quota.",
+        orKeyPlaceholder:      "sk-or-v1-...",
+        orSaveBtn:             "Save & Enable",
+        orSavingBtn:           "Saving…",
+        orKeyError:            "Invalid key format — OpenRouter Management Keys start with sk-or-",
+        orSaveError:           "Failed to save. Please check your key and try again.",
       },
     };
 
@@ -304,7 +332,7 @@
 
     // ── Constants ──────────────────────────────────────────────────────────────
 
-    const PLATFORM_ORDER = ["claude", "codex", "antigravity", "kimi", "minimax", "trae", "deepseek"];
+    const PLATFORM_ORDER = ["claude", "codex", "antigravity", "cursor", "kimi", "minimax", "trae", "deepseek", "openrouter"];
 
     const LOGOS = {
       claude:      "/assets/claude.png",
@@ -314,6 +342,8 @@
       minimax:     "/assets/minimax.png",
       trae:        "/assets/trae.png",
       deepseek:    "/assets/deepseek.png",
+      openrouter:  "/assets/openrouter.png",
+      cursor:      "/assets/cursor.png",
     };
 
     // Per-platform setup guide data (text pulled dynamically from i18n)
@@ -338,6 +368,13 @@
           downloadUrl:  null,
           downloadText: null,
         },
+        cursor: {
+          type: "local_app",
+          desc: t("guideCursorDesc"),
+          note: t("guideCursorNote"),
+          downloadUrl:  "https://cursor.com/download",
+          downloadText: t("guideCursorDl"),
+        },
         kimi: {
           type: "cookie",
           visitUrl:  "https://www.kimi.com",
@@ -357,6 +394,9 @@
           type: "cookie_header",
           visitUrl:  "https://platform.deepseek.com/usage",
           visitText: t("guideVisitDeepseek"),
+        },
+        openrouter: {
+          type: "api_key",
         },
       };
     }
@@ -486,11 +526,19 @@
       "本周用量":   "Weekly Usage",
       "充值余额":   "Balance",
       "本月消费":   "Monthly Spend",
+      "当前余额":   "Balance",
+      "累计消费":   "Total Spent",
+      "累计充值":   "Total Credits",
+      "套餐":      "Plan",
+      "本月请求":  "Monthly Requests",
+      "套餐用量":  "Plan Usage",
+      "按需消费":  "On-Demand Spend",
     };
 
-    // Dynamic suffix replacements for labels like "GPT-4o 请求次数"
+    // Dynamic suffix replacements for labels like "GPT-4o 请求次数" or "GPT-4 用量"
     const LABEL_SUFFIX_ZH_TO_EN = [
       ["请求次数", "Requests"],
+      [" 用量",   " Usage"],
     ];
 
     function translateLabel(label) {
@@ -657,7 +705,8 @@
     function renderPickerBody() {
       const enabledIds  = new Set(allPlatforms.filter(p => p.enabled).map(p => p.id));
       const localApps   = allPlatforms.filter(p => p.type === "local_app");
-      const needsPlugin = allPlatforms.filter(p => p.type !== "local_app");
+      const apiKeyPlats = allPlatforms.filter(p => p.type === "api_key");
+      const needsPlugin = allPlatforms.filter(p => p.type !== "local_app" && p.type !== "api_key");
 
       function localCard(p) {
         const already = enabledIds.has(p.id);
@@ -700,11 +749,31 @@
 
       const anySelected = pickerSelected.size > 0;
 
+      function apiKeyCard(p) {
+        const already = enabledIds.has(p.id);
+        return `
+          <button type="button"
+            onclick="${already ? '' : `openSetupWizard('${p.id}')`}"
+            ${already ? 'disabled' : ''}
+            class="flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition
+              ${already
+                ? 'border-zinc-700 opacity-40 cursor-not-allowed'
+                : 'border-zinc-700 hover:border-indigo-500 hover:bg-zinc-900 cursor-pointer'}">
+            <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
+            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+            ${already ? `<span class="text-xs text-zinc-500">${t("platformAdded")}</span>` : ''}
+          </button>`;
+      }
+
       document.getElementById("modalBody").innerHTML = `
         <div class="space-y-5">
           <div>
             <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">${t("modalLocalSection")}</p>
             <div class="grid grid-cols-3 gap-3">${localApps.map(localCard).join("")}</div>
+          </div>
+          <div>
+            <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">${t("modalApiKeySection")}</p>
+            <div class="grid grid-cols-3 gap-3">${apiKeyPlats.map(apiKeyCard).join("")}</div>
           </div>
           <div>
             <p class="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-500">${t("modalPluginSection")}</p>
@@ -775,8 +844,88 @@
 
       if (guide.type === "local_app") {
         renderLocalAppSetup(platformId, guide);
+      } else if (guide.type === "api_key") {
+        renderApiKeySetup(platformId);
       } else {
         renderPluginSetup(platformId, guide);
+      }
+    }
+
+    function renderApiKeySetup(platformId) {
+      document.getElementById("modalBody").innerHTML = `
+        <div class="space-y-4">
+
+          <!-- Step 1: Create key -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">1</div>
+            <div class="pt-0.5">
+              <p class="text-sm font-medium text-zinc-200">${t("orStep1Title")}</p>
+              <p class="mt-1 text-xs text-zinc-500">${t("orStep1Desc")}</p>
+              <p class="mt-2 rounded-md border border-amber-800/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">${t("orStep1Note")}</p>
+            </div>
+          </div>
+
+          <!-- Security note -->
+          <div class="rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-400">
+            ${t("orSecurityNote")}
+          </div>
+
+          <!-- Step 2: Paste key -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">2</div>
+            <div class="w-full pt-0.5">
+              <p class="mb-2 text-sm font-medium text-zinc-200">${lang === "zh" ? "粘贴 Management Key" : "Paste your Management Key"}</p>
+              <input id="orApiKeyInput" type="password"
+                placeholder="${t("orKeyPlaceholder")}"
+                class="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100
+                       placeholder-zinc-600 focus:border-indigo-500 focus:outline-none" />
+              <div id="orKeyError" class="mt-2 hidden text-xs text-red-400"></div>
+            </div>
+          </div>
+
+          <button id="orSaveBtn" type="button" onclick="saveOpenRouterKey()"
+            class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+            ${t("orSaveBtn")}
+          </button>
+        </div>`;
+    }
+
+    async function saveOpenRouterKey() {
+      const input = document.getElementById("orApiKeyInput");
+      const errEl = document.getElementById("orKeyError");
+      const btn   = document.getElementById("orSaveBtn");
+      const key   = (input?.value || "").trim();
+
+      errEl.classList.add("hidden");
+      if (!key.startsWith("sk-or-")) {
+        errEl.textContent = t("orKeyError");
+        errEl.classList.remove("hidden");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = t("orSavingBtn");
+      try {
+        const r = await fetch("/api/platforms/openrouter/apikey", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: key }),
+        });
+        if (r.ok) {
+          await loadPlatforms();
+          showSetupSuccess(["openrouter"]);
+        } else {
+          const err = await r.json().catch(() => ({}));
+          errEl.textContent = err.detail || t("orSaveError");
+          errEl.classList.remove("hidden");
+          btn.disabled = false;
+          btn.textContent = t("orSaveBtn");
+        }
+      } catch(e) {
+        errEl.textContent = t("orSaveError");
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = t("orSaveBtn");
       }
     }
 
@@ -880,6 +1029,11 @@
     // ── Re-import existing platform ─────────────────────────────────────────────
 
     function openReimport(platformId, displayName) {
+      // API-key platforms use the key setup wizard instead of file upload
+      if (platformId === "openrouter") {
+        openSetupWizard(platformId);
+        return;
+      }
       modalScreen = "reimport";
       setupTarget = platformId;
       openModal(t("reimportTitle"));

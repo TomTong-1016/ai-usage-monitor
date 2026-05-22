@@ -1,5 +1,6 @@
 {
   "claude_org_id": "YOUR_CLAUDE_ORG_ID",
+  "openrouter_api_key": "",
   "enabled_platforms": [],
   "removed_platforms": []
 }

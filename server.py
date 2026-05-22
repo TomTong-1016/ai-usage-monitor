@@ -42,6 +42,8 @@ PLATFORM_META: dict[str, dict] = {
     "trae":        {"type": "cookie_header", "display_name": "Trae"},
     "minimax":     {"type": "cookie_header", "display_name": "MiniMax"},
     "deepseek":    {"type": "cookie_header", "display_name": "DeepSeek"},
+    "openrouter":  {"type": "api_key",       "display_name": "OpenRouter"},
+    "cursor":      {"type": "local_app",     "display_name": "Cursor"},
 }
 
 
@@ -80,6 +82,13 @@ def platform_is_ready(name: str) -> bool:
 
     if name == "antigravity":
         return True  # verified at fetch time; always show if user adds it
+
+    if name == "openrouter":
+        return bool(load_config().get("openrouter_api_key", "").strip())
+
+    if name == "cursor":
+        db = Path.home() / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
+        return db.exists()
 
     cfg = PLATFORMS.get(name)
     if not cfg:
@@ -124,6 +133,8 @@ def classify_error(exc: Exception) -> str:
         if status in {401, 403}:
             if "trae.ai" in str(exc.request.url):
                 return "Trae 登录态无效：请重新导出凭据，Authorization 也会过期"
+            if "cursor.com" in str(exc.request.url):
+                return "Cursor 登录态无效：请重新在 Cursor App 中登录，或重启服务后重试"
             return "Cookie 已失效，请重新导出"
         return f"HTTP {status}: {exc.response.text[:240]}"
     if isinstance(exc, httpx.TimeoutException):
@@ -313,6 +324,31 @@ async def detect_and_enable(name: str) -> dict:
         asyncio.create_task(refresh_platform(PLATFORMS[name]))
 
     return {"ready": True, "enabled": enabled}
+
+
+@app.post("/api/platforms/openrouter/apikey")
+async def save_openrouter_apikey(payload: dict) -> dict:
+    """Save OpenRouter Management API Key to config.json and enable the platform."""
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=422, detail="api_key is required")
+    if not api_key.startswith("sk-or-"):
+        raise HTTPException(status_code=422, detail="Invalid key format — OpenRouter keys start with sk-or-")
+
+    config = load_config()
+    config["openrouter_api_key"] = api_key
+    enabled: list[str] = config.get("enabled_platforms", [])
+    removed: list[str] = config.get("removed_platforms", [])
+    if "openrouter" in removed:
+        removed.remove("openrouter")
+        config["removed_platforms"] = removed
+    if "openrouter" not in enabled:
+        enabled.append("openrouter")
+        config["enabled_platforms"] = enabled
+    _save_config(config)
+
+    asyncio.create_task(refresh_platform(PLATFORMS["openrouter"]))
+    return {"ok": True}
 
 
 @app.delete("/api/platforms/{name}")

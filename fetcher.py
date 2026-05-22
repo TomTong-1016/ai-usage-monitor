@@ -113,6 +113,21 @@ PLATFORMS: dict[str, PlatformConfig] = {
         cookie_file="",
         url="local://antigravity",
     ),
+    "openrouter": PlatformConfig(
+        name="openrouter",
+        display_name="OpenRouter",
+        cookie_file="",
+        url="https://openrouter.ai/api/v1/credits",
+        headers={
+            "accept": "application/json",
+        },
+    ),
+    "cursor": PlatformConfig(
+        name="cursor",
+        display_name="Cursor",
+        cookie_file="",
+        url="local://cursor",
+    ),
 }
 
 
@@ -488,6 +503,210 @@ async def fetch_antigravity_usage(timeout: float) -> dict[str, Any]:
     raise FileNotFoundError("Antigravity App usage endpoint not found")
 
 
+def _cursor_db_conn():
+    """Return a read-only SQLite connection to Cursor's local state database."""
+    import sqlite3 as _sqlite3
+    db_path = Path.home() / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
+    if not db_path.exists():
+        raise FileNotFoundError(
+            "Cursor database not found — make sure Cursor is installed and you've signed in at least once"
+        )
+    uri = db_path.as_uri() + "?mode=ro"
+    try:
+        return _sqlite3.connect(uri, uri=True)
+    except _sqlite3.OperationalError:
+        return _sqlite3.connect(str(db_path))
+
+
+def _jwt_decode_payload(token: str) -> dict:
+    """Decode the payload segment of a JWT without verifying the signature."""
+    import base64 as _base64
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        return json.loads(_base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return {}
+
+
+def _jwt_user_id(token: str) -> str:
+    """Extract userId from JWT sub claim: 'auth0|user_xxx' → 'user_xxx'."""
+    sub = _jwt_decode_payload(token).get("sub", "")
+    return sub.split("|")[-1] if "|" in sub else sub
+
+
+def _jwt_is_expired(token: str) -> bool:
+    """Return True if the JWT has an exp claim that is already in the past."""
+    import time as _time
+    exp = _jwt_decode_payload(token).get("exp")
+    return bool(exp and _time.time() > exp)
+
+
+def fetch_cursor_token() -> str:
+    """Read Cursor credentials from local SQLite and return a valid WorkosCursorSessionToken.
+
+    The cookie format cursor.com expects is:  userId::accessToken
+    where userId is extracted from the JWT sub claim.
+
+    If the stored accessToken is expired, we fall back to the refreshToken
+    (Cursor keeps both in SQLite).  The refreshToken is long-lived and also
+    accepted as the WorkosCursorSessionToken session value.
+    """
+    conn = _cursor_db_conn()
+    try:
+        cur = conn.cursor()
+
+        def _read(key: str) -> str:
+            row = cur.execute("SELECT value FROM ItemTable WHERE key = ?", (key,)).fetchone()
+            return (row[0] or "").strip() if row else ""
+
+        access_token = _read("cursorAuth/accessToken")
+        refresh_token = _read("cursorAuth/refreshToken")
+
+        if not access_token and not refresh_token:
+            raise FileNotFoundError(
+                "Cursor auth token not found in database — please sign in to Cursor"
+            )
+
+        # Pick whichever token is still valid; prefer access_token.
+        for token in (access_token, refresh_token):
+            if not token:
+                continue
+            # Already composed (shouldn't happen, but safe)
+            if "::" in token:
+                return token
+            if _jwt_is_expired(token):
+                continue
+            user_id = _jwt_user_id(token)
+            if user_id:
+                return f"{user_id}::{token}"
+
+        # All tokens appear expired — use the best one we have and let the API decide
+        token = access_token or refresh_token
+        user_id = _jwt_user_id(token)
+        if user_id:
+            return f"{user_id}::{token}"
+        return token
+    finally:
+        conn.close()
+
+
+async def fetch_cursor_usage(timeout: float) -> dict[str, Any]:
+    """Fetch Cursor usage via urllib (matches what the browser sends; httpx gets 401)."""
+    import asyncio as _asyncio
+    import urllib.request as _urlreq
+    import urllib.error as _urlerr
+
+    token = fetch_cursor_token()
+    user_id = token.split("::")[0] if "::" in token else ""
+
+    def _get(url: str) -> dict:
+        req = _urlreq.Request(url, headers={
+            "Accept": "application/json",
+            "Cookie": f"WorkosCursorSessionToken={token}",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://cursor.com/dashboard/usage",
+        })
+        with _urlreq.urlopen(req, timeout=int(timeout)) as r:
+            return json.loads(r.read())
+
+    def _sync_fetch() -> dict[str, Any]:
+        import time as _time
+        from datetime import datetime, timezone
+
+        # /api/usage?user=<id>  — per-model request counts
+        usage_url = f"https://cursor.com/api/usage?user={user_id}" if user_id else "https://cursor.com/api/usage"
+        try:
+            usage = _get(usage_url)
+        except _urlerr.HTTPError as exc:
+            raise httpx.HTTPStatusError(
+                str(exc), request=httpx.Request("GET", usage_url),
+                response=httpx.Response(exc.code),
+            ) from exc
+
+        # /api/usage-summary  — higher-level summary (fast/slow request quotas for paid plans)
+        summary: dict = {}
+        try:
+            summary = _get("https://cursor.com/api/usage-summary")
+        except Exception:
+            pass
+
+        # /api/auth/stripe  — subscription / membership info
+        stripe: dict = {}
+        try:
+            stripe = _get("https://cursor.com/api/auth/stripe")
+        except Exception:
+            pass
+
+        # /api/dashboard/get-filtered-usage-events  — actual request count for free users
+        # Free users have plan.limit == 0 in summary; paid users show dollar-based metrics instead.
+        events_total: int | None = None
+        try:
+            individual = (summary.get("individualUsage") or {})
+            plan = individual.get("plan") or {}
+            plan_limit = float(plan.get("limit") or 0)
+            billing_start = summary.get("billingCycleStart")
+
+            if plan_limit == 0 and billing_start:
+                dt = datetime.fromisoformat(billing_start.replace("Z", "+00:00"))
+                start_ms = str(int(dt.timestamp() * 1000))
+                end_ms = str(int(_time.time() * 1000))
+
+                def _post_events(page: int) -> dict:
+                    body = json.dumps({
+                        "teamId": 0,
+                        "startDate": start_ms,
+                        "endDate": end_ms,
+                        "page": page,
+                        "pageSize": 100,
+                    }).encode()
+                    req = _urlreq.Request(
+                        "https://cursor.com/api/dashboard/get-filtered-usage-events",
+                        data=body,
+                        headers={
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                            "Cookie": f"WorkosCursorSessionToken={token}",
+                            "User-Agent": (
+                                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+                            ),
+                            "Referer": "https://cursor.com/cn/dashboard/usage",
+                            "Origin": "https://cursor.com",
+                        },
+                    )
+                    with _urlreq.urlopen(req, timeout=int(timeout)) as r:
+                        return json.loads(r.read())
+
+                data = _post_events(1)
+                # API returns totalUsageEventsCount directly — no need to paginate
+                events_total = int(data.get("totalUsageEventsCount") or len(data.get("usageEventsDisplay") or []))
+        except Exception:
+            pass
+
+        return {"usage": usage, "summary": summary, "stripe": stripe, "events_total": events_total}
+
+    return await _asyncio.to_thread(_sync_fetch)
+
+
+async def fetch_openrouter_usage(timeout: float) -> dict[str, Any]:
+    api_key = load_config().get("openrouter_api_key", "")
+    if not api_key:
+        raise FileNotFoundError("OpenRouter Management API Key not configured")
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await client.get(
+            "https://openrouter.ai/api/v1/credits",
+            headers={"Authorization": f"Bearer {api_key}", "accept": "application/json"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def fetch_platform(
     config: PlatformConfig,
     *,
@@ -505,6 +724,10 @@ async def fetch_platform(
         return await fetch_deepseek_usage(config, timeout)
     if config.name == "antigravity":
         return await fetch_antigravity_usage(timeout)
+    if config.name == "openrouter":
+        return await fetch_openrouter_usage(timeout)
+    if config.name == "cursor":
+        return await fetch_cursor_usage(timeout)
 
     override = merged_request_override(config.name)
     if config.name == "trae" and override.get("_invalid_reason"):

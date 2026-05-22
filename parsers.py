@@ -279,6 +279,138 @@ def parse_antigravity(data: dict) -> list[Metric]:
     return metrics
 
 
+def parse_openrouter(data: dict) -> list[Metric]:
+    d = data.get("data", {})
+    total = float(d.get("total_credits", 0) or 0)
+    used  = float(d.get("total_usage",   0) or 0)
+    remaining = round(total - used, 4)
+    return [
+        Metric(platform="openrouter", label="当前余额",   used=remaining,      total=None, unit="$"),
+        Metric(platform="openrouter", label="累计消费",   used=round(used, 4), total=None, unit="$"),
+        Metric(platform="openrouter", label="累计充值",   used=round(total, 4),total=None, unit="$"),
+    ]
+
+
+def _cursor_next_reset(start_of_month_iso: str | None) -> str | None:
+    """Given the startOfMonth ISO string, return next month's date as the reset time."""
+    if not start_of_month_iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(start_of_month_iso.replace("Z", "+00:00"))
+        # Advance by one month
+        month = dt.month % 12 + 1
+        year = dt.year + (1 if dt.month == 12 else 0)
+        next_reset = dt.replace(year=year, month=month)
+        return next_reset.isoformat()
+    except Exception:
+        return None
+
+
+def parse_cursor(data: dict) -> list[Metric]:
+    usage   = data.get("usage")   or {}
+    summary = data.get("summary") or {}
+    metrics: list[Metric] = []
+
+    # billingCycleEnd from /api/usage-summary is the accurate reset date.
+    # Fall back to computing it from startOfMonth when summary is unavailable.
+    reset_time = summary.get("billingCycleEnd") or _cursor_next_reset(usage.get("startOfMonth"))
+
+    # ── /api/usage-summary — primary source for paid plans ───────────────────
+    individual = summary.get("individualUsage") or {}
+    plan       = individual.get("plan")     or {}
+    on_demand  = individual.get("onDemand") or {}
+
+    plan_used  = _num(plan.get("used",  0))
+    plan_limit = _num(plan.get("limit") or 0)
+    total_pct  = _num(plan.get("totalPercentUsed", 0))
+
+    if plan_limit > 0:
+        # Paid plan: dollar-based quota (Pro / Business / Team)
+        metrics.append(Metric(
+            platform="cursor",
+            label="套餐用量",
+            used=round(total_pct, 1),
+            total=100.0,
+            unit="%",
+            reset_time=reset_time,
+        ))
+        metrics.append(Metric(
+            platform="cursor",
+            label="本月消费",
+            used=round(plan_used, 2),
+            total=round(plan_limit, 2),
+            unit="$",
+            reset_time=reset_time,
+        ))
+
+    # On-demand (pay-as-you-go) spend — only show when non-zero
+    if on_demand.get("enabled") and _num(on_demand.get("used", 0)) > 0:
+        metrics.append(Metric(
+            platform="cursor",
+            label="按需消费",
+            used=round(_num(on_demand["used"]), 2),
+            total=None,
+            unit="$",
+            reset_time=reset_time,
+        ))
+
+    # ── /api/usage — fallback: per-model request counts (free tier) ──────────
+    if not metrics:
+        # Prefer the accurate total from get-filtered-usage-events (free users only)
+        events_total = data.get("events_total")
+        if events_total is not None:
+            metrics.append(Metric(
+                platform="cursor",
+                label="本月请求",
+                used=int(events_total),
+                total=None,
+                unit="次",
+                reset_time=reset_time,
+            ))
+        else:
+            label_map = {
+                "gpt-4":             "GPT-4 用量",
+                "gpt-3.5-turbo":     "GPT-3.5 用量",
+                "claude-3.5-sonnet": "Sonnet 用量",
+                "claude-3-opus":     "Opus 用量",
+            }
+            has_model_data = False
+            total_requests = 0
+            for model_key, model_data in usage.items():
+                if not isinstance(model_data, dict):
+                    continue
+                num_req = model_data.get("numRequests")
+                if num_req is None:
+                    continue
+                has_model_data = True
+                max_req = model_data.get("maxRequestUsage")
+                if max_req:
+                    pct = round(_num(num_req) / _num(max_req) * 100, 1)
+                    label = label_map.get(model_key, f"{model_key} 用量")
+                    metrics.append(Metric(
+                        platform="cursor",
+                        label=label,
+                        used=pct,
+                        total=100.0,
+                        unit="%",
+                        reset_time=reset_time,
+                    ))
+                else:
+                    total_requests += int(_num(num_req))
+
+            if has_model_data and not any(m.unit == "%" for m in metrics):
+                metrics.append(Metric(
+                    platform="cursor",
+                    label="本月请求",
+                    used=total_requests,
+                    total=None,
+                    unit="次",
+                    reset_time=reset_time,
+                ))
+
+    return metrics
+
+
 PARSERS = {
     "claude": parse_claude,
     "codex": parse_codex,
@@ -287,4 +419,6 @@ PARSERS = {
     "minimax": parse_minimax,
     "deepseek": parse_deepseek,
     "antigravity": parse_antigravity,
+    "openrouter": parse_openrouter,
+    "cursor": parse_cursor,
 }
