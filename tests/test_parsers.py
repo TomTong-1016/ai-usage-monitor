@@ -1,5 +1,5 @@
 from models import Metric, PlatformResult
-from parsers import parse_antigravity, parse_claude, parse_codex, parse_deepseek, parse_kimi, parse_minimax, parse_trae
+from parsers import parse_antigravity, parse_antigravity_ide, parse_claude, parse_codex, parse_deepseek, parse_kimi, parse_minimax, parse_trae
 
 
 def test_metric_percent():
@@ -142,7 +142,7 @@ def test_parse_trae_usage_amounts_mean_used():
     assert basic.used == 12.5
     assert basic.total == 20
     assert bonus.used == 8.25
-    assert bonus.total == 60
+    assert bonus.total is None
 
 
 def test_parse_deepseek_combines_summary_and_amount():
@@ -263,3 +263,41 @@ def test_parse_antigravity_reads_credits_and_model_quota():
     assert model.used == 75
     assert model.total == 100
     assert model.reset_time == "2026-05-27T02:20:38Z"
+
+
+def test_parse_antigravity_ide_reads_credits_and_model_quota():
+    data = {
+        "user_status": {
+            "userStatus": {
+                "userTier": {
+                    "availableCredits": [
+                        {"creditType": "CREDIT_TYPE_USE_AI", "creditAmount": 1234}
+                    ]
+                }
+            }
+        },
+        "available_models": {
+            "response": {
+                "clientModelConfigs": [
+                    {
+                        "label": "Gemini 3.1 Pro (High)",
+                        "quotaInfo": {
+                            "remainingFraction": 0.25,
+                            "resetTime": "2026-05-27T02:20:38Z",
+                        },
+                    }
+                ]
+            }
+        },
+    }
+
+    metrics = parse_antigravity_ide(data)
+
+    assert next(m for m in metrics if m.label == "AI Credits").used == 1234
+    assert next(m for m in metrics if m.label == "AI Credits").platform == "antigravity_ide"
+    model = next(m for m in metrics if m.label == "Gemini 3.1 Pro (High)")
+    assert model.used == 75
+    assert model.total == 100
+    assert model.platform == "antigravity_ide"
+    assert model.reset_time == "2026-05-27T02:20:38Z"
+

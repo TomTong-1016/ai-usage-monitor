@@ -38,6 +38,7 @@ PLATFORM_META: dict[str, dict] = {
     "claude":      {"type": "cookie_header", "display_name": "Claude"},
     "codex":       {"type": "local_app",     "display_name": "Codex"},
     "antigravity": {"type": "local_app",     "display_name": "Google Antigravity"},
+    "antigravity_ide": {"type": "local_app",     "display_name": "Antigravity IDE"},
     "kimi":        {"type": "cookie",        "display_name": "Kimi"},
     "trae":        {"type": "cookie_header", "display_name": "Trae"},
     "minimax":     {"type": "cookie_header", "display_name": "MiniMax"},
@@ -80,7 +81,7 @@ def platform_is_ready(name: str) -> bool:
             ]
         )
 
-    if name == "antigravity":
+    if name in {"antigravity", "antigravity_ide"}:
         return True  # verified at fetch time; always show if user adds it
 
     if name == "openrouter":

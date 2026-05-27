@@ -138,7 +138,7 @@ def parse_trae(data: dict) -> list[Metric]:
             unit="$",
             reset_time=reset_time,
         ))
-    metrics.append(Metric(platform="trae", label="Bonus", used=bonus_used, total=60.0, unit="$", reset_time=reset_time))
+    metrics.append(Metric(platform="trae", label="Bonus", used=bonus_used, total=None, unit="$", reset_time=reset_time))
     return metrics
 
 
@@ -235,6 +235,14 @@ def _antigravity_model_configs(data: dict) -> list[dict]:
 
 
 def parse_antigravity(data: dict) -> list[Metric]:
+    return _parse_antigravity_with_platform(data, "antigravity")
+
+
+def parse_antigravity_ide(data: dict) -> list[Metric]:
+    return _parse_antigravity_with_platform(data, "antigravity_ide")
+
+
+def _parse_antigravity_with_platform(data: dict, platform: str) -> list[Metric]:
     metrics: list[Metric] = []
     user_status = ((data.get("user_status") or {}).get("userStatus") or {})
     user_tier = user_status.get("userTier") or {}
@@ -251,7 +259,7 @@ def parse_antigravity(data: dict) -> list[Metric]:
         credit_amount = ai_credit.get("creditAmount")
         if credit_amount is not None:
             metrics.append(Metric(
-                platform="antigravity",
+                platform=platform,
                 label="AI Credits",
                 used=_num(credit_amount),
                 total=None,
@@ -268,7 +276,7 @@ def parse_antigravity(data: dict) -> list[Metric]:
         seen.add(label)
         used_pct = max(0.0, min(100.0, round((1 - _num(remaining, 1.0)) * 100, 1)))
         metrics.append(Metric(
-            platform="antigravity",
+            platform=platform,
             label=label,
             used=used_pct,
             total=100.0,
@@ -419,6 +427,7 @@ PARSERS = {
     "minimax": parse_minimax,
     "deepseek": parse_deepseek,
     "antigravity": parse_antigravity,
+    "antigravity_ide": parse_antigravity_ide,
     "openrouter": parse_openrouter,
     "cursor": parse_cursor,
 }

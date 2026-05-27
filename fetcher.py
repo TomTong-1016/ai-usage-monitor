@@ -113,6 +113,12 @@ PLATFORMS: dict[str, PlatformConfig] = {
         cookie_file="",
         url="local://antigravity",
     ),
+    "antigravity_ide": PlatformConfig(
+        name="antigravity_ide",
+        display_name="Antigravity IDE",
+        cookie_file="",
+        url="local://antigravity_ide",
+    ),
     "openrouter": PlatformConfig(
         name="openrouter",
         display_name="OpenRouter",
@@ -433,7 +439,7 @@ async def fetch_deepseek_usage(config: PlatformConfig, timeout: float) -> dict[s
     }
 
 
-def antigravity_ports() -> list[int]:
+def antigravity_processes(ide: bool = False) -> list[dict[str, Any]]:
     result = subprocess.run(
         ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
         check=False,
@@ -444,14 +450,55 @@ def antigravity_ports() -> list[int]:
     if result.returncode != 0:
         return []
 
-    ports: list[int] = []
+    def get_process_command(pid: int) -> str:
+        try:
+            res = subprocess.run(
+                ["ps", "-ww", "-p", str(pid), "-o", "command="],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if res.returncode == 0:
+                return res.stdout.strip()
+        except Exception:
+            pass
+        return ""
+
+    processes: dict[int, dict[str, Any]] = {}
     for line in result.stdout.splitlines():
         if "language_" not in line and "language_server" not in line:
             continue
         match = re.search(r"127\.0\.0\.1:(\d+)\s+\(LISTEN\)", line)
-        if match:
-            ports.append(int(match.group(1)))
-    return ports
+        if not match:
+            continue
+        port = int(match.group(1))
+
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                pid = int(parts[1])
+                if pid in processes:
+                    processes[pid]["ports"].append(port)
+                    continue
+
+                cmd = get_process_command(pid)
+                is_ide = "antigravity-ide" in cmd or "Antigravity IDE" in cmd
+                if is_ide == ide:
+                    csrf_token = ""
+                    csrf_match = re.search(r"--csrf_token\s+([^\s]+)", cmd)
+                    if csrf_match:
+                        csrf_token = csrf_match.group(1)
+                    
+                    processes[pid] = {
+                        "pid": pid,
+                        "csrf_token": csrf_token,
+                        "ports": [port],
+                        "cmd": cmd
+                    }
+            except ValueError:
+                pass
+    return list(processes.values())
 
 
 async def _antigravity_rpc(
@@ -473,34 +520,52 @@ async def _antigravity_rpc(
     return response.json()
 
 
-async def fetch_antigravity_usage(timeout: float) -> dict[str, Any]:
-    ports = antigravity_ports()
-    if not ports:
-        raise FileNotFoundError("Antigravity App language server not found")
+async def fetch_antigravity_usage(timeout: float, ide: bool = False) -> dict[str, Any]:
+    procs = antigravity_processes(ide=ide)
+    if not procs:
+        name = "Antigravity IDE" if ide else "Antigravity App"
+        raise FileNotFoundError(f"{name} language server not found")
 
     async with httpx.AsyncClient(verify=False, timeout=timeout, follow_redirects=True) as client:
         last_error: Exception | None = None
-        for port in ports:
-            base_url = f"https://127.0.0.1:{port}"
-            try:
-                home = await client.get(base_url)
-                home.raise_for_status()
-                match = re.search(r'"csrfToken":"([^"]+)"', home.text)
-                if not match:
-                    continue
-                csrf_token = match.group(1)
-                return {
-                    "user_status": await _antigravity_rpc(client, base_url, csrf_token, "GetUserStatus"),
-                    "available_models": await _antigravity_rpc(client, base_url, csrf_token, "GetAvailableModels"),
-                    "source": "antigravity-local-language-server",
-                }
-            except Exception as exc:
-                last_error = exc
-                continue
+        for proc in procs:
+            csrf_token = proc["csrf_token"]
+            ports = proc["ports"]
+            
+            for port in ports:
+                for proto in ["https", "http"]:
+                    base_url = f"{proto}://127.0.0.1:{port}"
+                    current_csrf = csrf_token
+                    if not current_csrf:
+                        try:
+                            home = await client.get(base_url)
+                            home.raise_for_status()
+                            match = re.search(r'"csrfToken":"([^"]+)"', home.text)
+                            if match:
+                                current_csrf = match.group(1)
+                        except Exception as exc:
+                            last_error = exc
+                            continue
+                    
+                    if not current_csrf:
+                        continue
+                        
+                    try:
+                        user_status = await _antigravity_rpc(client, base_url, current_csrf, "GetUserStatus")
+                        available_models = await _antigravity_rpc(client, base_url, current_csrf, "GetAvailableModels")
+                        return {
+                            "user_status": user_status,
+                            "available_models": available_models,
+                            "source": "antigravity-ide-local-language-server" if ide else "antigravity-local-language-server",
+                        }
+                    except Exception as exc:
+                        last_error = exc
+                        continue
 
+    name = "Antigravity IDE" if ide else "Antigravity App"
     if last_error:
-        raise FileNotFoundError(f"Antigravity App usage endpoint not reachable: {last_error}") from last_error
-    raise FileNotFoundError("Antigravity App usage endpoint not found")
+        raise FileNotFoundError(f"{name} usage endpoint not reachable: {last_error}") from last_error
+    raise FileNotFoundError(f"{name} usage endpoint not found")
 
 
 def _cursor_db_conn():
@@ -723,7 +788,9 @@ async def fetch_platform(
     if config.name == "deepseek":
         return await fetch_deepseek_usage(config, timeout)
     if config.name == "antigravity":
-        return await fetch_antigravity_usage(timeout)
+        return await fetch_antigravity_usage(timeout, ide=False)
+    if config.name == "antigravity_ide":
+        return await fetch_antigravity_usage(timeout, ide=True)
     if config.name == "openrouter":
         return await fetch_openrouter_usage(timeout)
     if config.name == "cursor":
