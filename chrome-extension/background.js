@@ -6,8 +6,9 @@
  * These are later packaged by popup.js into a credentials.json export.
  *
  * NOTE: Kimi only needs cookies, so there is no request header to capture.
- * Codex is handled server-side by reading local app data directly.
- * This background worker captures headers for: Claude, Trae, MiniMax, DeepSeek.
+ * Codex can use the local app cache, but capturing ChatGPT cookies/headers lets
+ * the server fetch fresh wham usage data when the cache lags behind.
+ * This background worker captures headers for: Claude, Codex, Trae, MiniMax, DeepSeek.
  */
 
 // ─── Platform definitions ─────────────────────────────────────────────────────
@@ -18,6 +19,12 @@ const PLATFORMS = {
     cookieDomain: "claude.ai",
     captureUrlPattern: "https://claude.ai/api/organizations/",
     headerFile: "claude-header.txt",
+  },
+  codex: {
+    name: "Codex",
+    cookieDomain: "chatgpt.com",
+    captureUrl: "https://chatgpt.com/backend-api/wham/usage",
+    headerFile: "codex-header.txt",
   },
   trae: {
     name: "Trae",
@@ -50,15 +57,23 @@ const PLATFORMS = {
       "deepseek-amount.txt":  "/api/v0/usage/amount",
     },
   },
+  siliconflow: {
+    name: "硅基流动",
+    cookieDomain: "cloud.siliconflow.cn",
+    captureUrl: "https://cloud.siliconflow.cn/walletd-server/api/v1/subject/profile/peek",
+    headerFile: "siliconflow-header.txt",
+  },
 };
 
 // ─── Request interception ─────────────────────────────────────────────────────
 
 const WATCH_URLS = [
   "https://claude.ai/api/organizations/*/usage",
+  "https://chatgpt.com/backend-api/wham/usage",
   "https://api-sg-central.trae.ai/*",
   "https://www.minimaxi.com/v1/api/*",
   "https://platform.deepseek.com/api/*",
+  "https://cloud.siliconflow.cn/walletd-server/api/*",
 ];
 
 chrome.webRequest.onSendHeaders.addListener(
@@ -95,6 +110,14 @@ chrome.webRequest.onSendHeaders.addListener(
       return;
     }
 
+    // ── Codex / ChatGPT wham usage ───────────────────────────────────────
+    if (urlObj.hostname === "chatgpt.com" && urlObj.pathname === "/backend-api/wham/usage") {
+      const headerValue = (name) => requestHeaders.find((h) => h.name.toLowerCase() === name)?.value || "";
+      if (headerValue("sec-fetch-mode") === "navigate") return;
+      chrome.storage.local.set({ "header_codex-header.txt": toHeaderTxt(requestHeaders) });
+      return;
+    }
+
     // ── Trae ──────────────────────────────────────────────────────────────
     if (
       urlObj.hostname === "api-sg-central.trae.ai" &&
@@ -107,6 +130,12 @@ chrome.webRequest.onSendHeaders.addListener(
     // ── MiniMax ───────────────────────────────────────────────────────────
     if (url.includes("minimaxi.com/v1/api")) {
       chrome.storage.local.set({ "header_minimax-header.txt": toHeaderTxt(requestHeaders) });
+      return;
+    }
+
+    // ── SiliconFlow ───────────────────────────────────────────────────────
+    if (url.includes("cloud.siliconflow.cn/walletd-server/api/v1/subject/profile/peek")) {
+      chrome.storage.local.set({ "header_siliconflow-header.txt": toHeaderTxt(requestHeaders) });
       return;
     }
 

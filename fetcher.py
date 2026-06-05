@@ -3,7 +3,9 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import re
+import selectors
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ import httpx
 
 
 ROOT = Path(__file__).parent
+CODEX_APP_SERVER_BIN = Path("/Applications/Codex.app/Contents/Resources/codex")
 
 
 def load_config() -> dict:
@@ -134,6 +137,17 @@ PLATFORMS: dict[str, PlatformConfig] = {
         cookie_file="",
         url="local://cursor",
     ),
+    "siliconflow": PlatformConfig(
+        name="siliconflow",
+        display_name="硅基流动",
+        cookie_file="cloud.siliconflow.cn_cookies.txt",
+        url="https://cloud.siliconflow.cn/walletd-server/api/v1/subject/profile/peek",
+        headers={
+            "accept": "*/*",
+            "content-type": "application/json",
+            "referer": "https://cloud.siliconflow.cn/me/expensebill",
+        },
+    ),
 }
 
 
@@ -143,7 +157,8 @@ OVERRIDE_HOST_ALLOWLIST: dict[str, set[str]] = {
     "trae": {"api-sg-central.trae.ai", "www.trae.ai"},
     "minimax": {"www.minimaxi.com", "platform.minimaxi.com"},
     "kimi": {"www.kimi.com"},
-    "deepseek": {"platform.deepseek.com"},
+    "deepseek":     {"platform.deepseek.com"},
+    "siliconflow":  {"cloud.siliconflow.cn"},
 }
 
 
@@ -274,6 +289,19 @@ def _has_cookie_header(override: dict[str, Any]) -> bool:
     return any(key.lower() == "cookie" and value for key, value in headers.items())
 
 
+def _has_direct_credentials(config: PlatformConfig, override: dict[str, Any]) -> bool:
+    cookie_path = ROOT / "cookie" / config.cookie_file
+    return cookie_path.exists() or _has_cookie_header(override)
+
+
+def _is_definitive_auth_failure(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {401, 403}
+    if isinstance(exc, ValueError):
+        return "Non-JSON response" in str(exc)
+    return False
+
+
 def _load_cookie_jar_for_request(config: PlatformConfig, override: dict[str, Any]) -> http.cookiejar.CookieJar | None:
     try:
         return load_cookie_jar(config.cookie_file)
@@ -330,6 +358,8 @@ const zlib = require('zlib');
 const dirs = [
   path.join(os.homedir(), 'Library/Application Support/Codex/Cache/Cache_Data'),
   path.join(os.homedir(), 'Library/Application Support/Codex/Partitions/codex-browser-app/Cache/Cache_Data'),
+  path.join(os.homedir(), 'Library/Caches/Codex/Cache/Cache_Data'),
+  path.join(os.homedir(), 'Library/Caches/Codex/Default/Cache/Cache_Data'),
 ];
 
 const files = [];
@@ -377,6 +407,105 @@ process.exit(2);
     if result.returncode != 0 or not result.stdout.strip():
         raise FileNotFoundError("Codex App usage cache not found")
     return json.loads(result.stdout)
+
+
+def fetch_codex_app_server_usage(timeout: float = 10.0) -> dict[str, Any]:
+    if not CODEX_APP_SERVER_BIN.exists():
+        raise FileNotFoundError("Codex app-server binary not found")
+
+    proc = subprocess.Popen(
+        [str(CODEX_APP_SERVER_BIN), "app-server", "--stdio"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+
+    try:
+        requests = [
+            {
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "ai-usage-monitor",
+                        "title": "AI Usage Monitor",
+                        "version": "0.1.0",
+                    },
+                    "capabilities": {
+                        "experimentalApi": True,
+                        "requestAttestation": False,
+                        "optOutNotificationMethods": [],
+                    },
+                },
+            },
+            {"id": 2, "method": "account/rateLimits/read", "params": None},
+        ]
+        for request in requests:
+            proc.stdin.write(json.dumps(request) + "\n")
+        proc.stdin.flush()
+
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            events = selector.select(remaining)
+            if not events:
+                break
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if message.get("id") != 2:
+                continue
+            if "error" in message:
+                raise ValueError(f"Codex app-server rate limit request failed: {message['error']}")
+            payload = message.get("result") or {}
+            snapshot = payload.get("rateLimits") or {}
+            primary = snapshot.get("primary") or {}
+            secondary = snapshot.get("secondary") or {}
+            return {
+                "plan_type": snapshot.get("planType"),
+                "rate_limit": {
+                    "allowed": snapshot.get("rateLimitReachedType") is None,
+                    "limit_reached": snapshot.get("rateLimitReachedType") is not None,
+                    "primary_window": {
+                        "used_percent": primary.get("usedPercent"),
+                        "limit_window_seconds": (
+                            primary.get("windowDurationMins") * 60
+                            if primary.get("windowDurationMins") is not None
+                            else None
+                        ),
+                        "reset_at": primary.get("resetsAt"),
+                    } if primary else {},
+                    "secondary_window": {
+                        "used_percent": secondary.get("usedPercent"),
+                        "limit_window_seconds": (
+                            secondary.get("windowDurationMins") * 60
+                            if secondary.get("windowDurationMins") is not None
+                            else None
+                        ),
+                        "reset_at": secondary.get("resetsAt"),
+                    } if secondary else {},
+                },
+                "credits": snapshot.get("credits"),
+                "source": "codex-app-server",
+            }
+        raise TimeoutError("Codex app-server rate limit request timed out")
+    finally:
+        selector.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 async def fetch_with_override(config: PlatformConfig, override: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -444,11 +573,11 @@ def antigravity_processes(ide: bool = False) -> list[dict[str, Any]]:
         ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
         check=False,
         capture_output=True,
-        text=True,
         timeout=5,
     )
     if result.returncode != 0:
         return []
+    stdout = result.stdout.decode("utf-8", errors="ignore")
 
     def get_process_command(pid: int) -> str:
         try:
@@ -456,17 +585,16 @@ def antigravity_processes(ide: bool = False) -> list[dict[str, Any]]:
                 ["ps", "-ww", "-p", str(pid), "-o", "command="],
                 check=False,
                 capture_output=True,
-                text=True,
                 timeout=2,
             )
             if res.returncode == 0:
-                return res.stdout.strip()
+                return res.stdout.decode("utf-8", errors="ignore").strip()
         except Exception:
             pass
         return ""
 
     processes: dict[int, dict[str, Any]] = {}
-    for line in result.stdout.splitlines():
+    for line in stdout.splitlines():
         if "language_" not in line and "language_server" not in line:
             continue
         match = re.search(r"127\.0\.0\.1:(\d+)\s+\(LISTEN\)", line)
@@ -759,6 +887,23 @@ async def fetch_cursor_usage(timeout: float) -> dict[str, Any]:
     return await _asyncio.to_thread(_sync_fetch)
 
 
+async def fetch_siliconflow_usage(config: PlatformConfig, timeout: float) -> dict[str, Any]:
+    import asyncio as _asyncio
+    override = merged_request_override(config.name)
+    jar = _load_cookie_jar_for_request(config, override)
+    headers = merge_headers(build_headers(config, jar), override.get("headers", {}))
+    base = "https://cloud.siliconflow.cn/walletd-server/api/v1/subject"
+
+    async with httpx.AsyncClient(cookies=jar, timeout=timeout, follow_redirects=True) as client:
+        peek_resp, wallets_resp = await _asyncio.gather(
+            client.get(f"{base}/profile/peek", headers=headers),
+            client.get(f"{base}/wallets?pageSize=1000&stage=3", headers=headers),
+        )
+    peek_resp.raise_for_status()
+    wallets_resp.raise_for_status()
+    return {"peek": peek_resp.json(), "wallets": wallets_resp.json()}
+
+
 async def fetch_openrouter_usage(timeout: float) -> dict[str, Any]:
     api_key = load_config().get("openrouter_api_key", "")
     if not api_key:
@@ -780,6 +925,20 @@ async def fetch_platform(
 ) -> dict[str, Any]:
     if config.name == "codex":
         try:
+            return fetch_codex_app_server_usage(timeout=min(timeout, 10.0))
+        except Exception:
+            pass
+
+        override = merged_request_override(config.name)
+        if _has_direct_credentials(config, override):
+            try:
+                data = await fetch_with_override(config, override, timeout)
+                if isinstance(data, dict):
+                    data.setdefault("source", "codex-wham-api")
+                return data
+            except Exception:
+                pass
+        try:
             return fetch_codex_app_cache_usage()
         except FileNotFoundError:
             raise
@@ -793,6 +952,8 @@ async def fetch_platform(
         return await fetch_antigravity_usage(timeout, ide=True)
     if config.name == "openrouter":
         return await fetch_openrouter_usage(timeout)
+    if config.name == "siliconflow":
+        return await fetch_siliconflow_usage(config, timeout)
     if config.name == "cursor":
         return await fetch_cursor_usage(timeout)
 

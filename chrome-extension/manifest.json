@@ -11,12 +11,14 @@
   ],
   "host_permissions": [
     "https://claude.ai/*",
+    "https://chatgpt.com/*",
     "https://www.trae.ai/*",
     "https://api-sg-central.trae.ai/*",
     "https://platform.minimaxi.com/*",
     "https://www.minimaxi.com/*",
     "https://www.kimi.com/*",
     "https://platform.deepseek.com/*",
+    "https://cloud.siliconflow.cn/*",
     "https://bailian.console.aliyun.com/*",
     "https://dashscope-intl.aliyuncs.com/*"
   ],

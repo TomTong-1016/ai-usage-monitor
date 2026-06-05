@@ -95,6 +95,7 @@
       "platform.minimaxi.com_cookies.txt":   "minimax",
       "www.kimi.com_cookies.txt":            "kimi",
       "platform.deepseek.com_cookies.txt":   "deepseek",
+      "cloud.siliconflow.cn_cookies.txt":    "siliconflow",
     };
 
     /**
@@ -194,6 +195,7 @@
         guideVisitTrae:     "访问 Trae 账户/用量页面（插件自动捕获 Entitlement 请求头）",
         guideVisitMinimax:  "访问 MiniMax 平台首页（插件自动捕获 Auth Header）",
         guideVisitDeepseek: "访问 DeepSeek 用量页，停留几秒（触发全部 3 个 API）",
+        guideVisitSiliconflow: "访问硅基流动账单页（插件自动捕获余额请求头）",
         guideCodexDesc:     "服务端读取 Codex App 的本地磁盘缓存，<strong>无需任何手动配置</strong>。",
         guideCodexNote:     "需要 Codex App 已安装并至少打开过一次（缓存才会存在）。",
         guideCodexDl:       "下载 Codex App",
@@ -216,6 +218,13 @@
         orSavingBtn:           "保存中…",
         orKeyError:            "Key 格式错误，OpenRouter Management Key 以 sk-or- 开头",
         orSaveError:           "保存失败，请检查 Key 是否正确",
+        // SiliconFlow
+        sfStep1Title:          "获取 API Key",
+        sfStep1Desc:           `前往 <a href="https://cloud.siliconflow.cn/account/ak" target="_blank" class="text-indigo-400 hover:text-indigo-300">cloud.siliconflow.cn</a> → 用户中心 → API 密钥 → 新建密钥 → 复制生成的密钥。`,
+        sfSecurityNote:        "🔒 此 Key 仅用于查询余额，不会发起 AI 请求或消耗 Token 额度。",
+        sfKeyPlaceholder:      "sk-...",
+        sfKeyError:            "Key 格式错误，硅基流动 API Key 以 sk- 开头",
+        sfSaveError:           "保存失败，请检查 Key 是否正确",
       },
       en: {
         pageTitle:          "AI Usage Monitor",
@@ -292,6 +301,7 @@
         guideVisitTrae:     "Visit Trae account/usage page (extension auto-captures Entitlement headers)",
         guideVisitMinimax:  "Visit MiniMax platform home (extension auto-captures Auth headers)",
         guideVisitDeepseek: "Visit DeepSeek usage page and wait a few seconds (triggers all 3 APIs)",
+        guideVisitSiliconflow: "Visit SiliconFlow expense page (extension auto-captures balance headers)",
         guideCodexDesc:     "Server reads Codex App's local disk cache — <strong>no manual setup needed</strong>.",
         guideCodexNote:     "Requires Codex App to be installed and opened at least once (so the cache exists).",
         guideCodexDl:       "Download Codex App",
@@ -314,6 +324,13 @@
         orSavingBtn:           "Saving…",
         orKeyError:            "Invalid key format — OpenRouter Management Keys start with sk-or-",
         orSaveError:           "Failed to save. Please check your key and try again.",
+        // SiliconFlow
+        sfStep1Title:          "Get your API Key",
+        sfStep1Desc:           `Go to <a href="https://cloud.siliconflow.cn/account/ak" target="_blank" class="text-indigo-400 hover:text-indigo-300">cloud.siliconflow.cn</a> → User Center → API Keys → Create New → Copy the key.`,
+        sfSecurityNote:        "🔒 This key is only used to read your balance. It will never make AI requests or consume any token quota.",
+        sfKeyPlaceholder:      "sk-...",
+        sfKeyError:            "Invalid key format — SiliconFlow API keys start with sk-",
+        sfSaveError:           "Failed to save. Please check your key and try again.",
       },
     };
 
@@ -336,7 +353,7 @@
 
     // ── Constants ──────────────────────────────────────────────────────────────
 
-    const PLATFORM_ORDER = ["claude", "codex", "antigravity", "antigravity_ide", "cursor", "kimi", "minimax", "trae", "deepseek", "openrouter"];
+    const PLATFORM_ORDER = ["claude", "codex", "antigravity", "antigravity_ide", "cursor", "kimi", "minimax", "trae", "deepseek", "openrouter", "siliconflow"];
 
     const LOGOS = {
       claude:      "/assets/claude.png",
@@ -349,6 +366,7 @@
       deepseek:    "/assets/deepseek.png",
       openrouter:  "/assets/openrouter.png",
       cursor:      "/assets/cursor.png",
+      siliconflow: "/assets/siliconflow.png",
     };
 
     // Per-platform setup guide data (text pulled dynamically from i18n)
@@ -409,6 +427,11 @@
         },
         openrouter: {
           type: "api_key",
+        },
+        siliconflow: {
+          type: "cookie_header",
+          visitUrl:  "https://cloud.siliconflow.cn/me/expensebill",
+          visitText: t("guideVisitSiliconflow"),
         },
       };
     }
@@ -545,6 +568,9 @@
       "本月请求":  "Monthly Requests",
       "套餐用量":  "Plan Usage",
       "按需消费":  "On-Demand Spend",
+      "赠送余额":  "Gift Credits",
+      "账户余额":  "Balance",
+      "优惠券余额": "Coupon Balance",
     };
 
     // Dynamic suffix replacements for labels like "GPT-4o 请求次数" or "GPT-4 用量"
@@ -863,54 +889,84 @@
       }
     }
 
+    function getApiKeyConfig(platformId) {
+      const cfgs = {
+        openrouter: {
+          step1Title:   t("orStep1Title"),
+          step1Desc:    t("orStep1Desc"),
+          step1Note:    t("orStep1Note"),
+          securityNote: t("orSecurityNote"),
+          placeholder:  t("orKeyPlaceholder"),
+          pasteLabel:   lang === "zh" ? "粘贴 Management Key" : "Paste your Management Key",
+          keyPrefix:    "sk-or-",
+          keyError:     t("orKeyError"),
+          saveError:    t("orSaveError"),
+        },
+        siliconflow: {
+          step1Title:   t("sfStep1Title"),
+          step1Desc:    t("sfStep1Desc"),
+          step1Note:    null,
+          securityNote: t("sfSecurityNote"),
+          placeholder:  t("sfKeyPlaceholder"),
+          pasteLabel:   lang === "zh" ? "粘贴 API Key" : "Paste your API Key",
+          keyPrefix:    "sk-",
+          keyError:     t("sfKeyError"),
+          saveError:    t("sfSaveError"),
+        },
+      };
+      return cfgs[platformId] || cfgs["openrouter"];
+    }
+
     function renderApiKeySetup(platformId) {
+      const cfg = getApiKeyConfig(platformId);
       document.getElementById("modalBody").innerHTML = `
         <div class="space-y-4">
 
-          <!-- Step 1: Create key -->
+          <!-- Step 1: Get key -->
           <div class="flex gap-3">
             <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">1</div>
             <div class="pt-0.5">
-              <p class="text-sm font-medium text-zinc-200">${t("orStep1Title")}</p>
-              <p class="mt-1 text-xs text-zinc-500">${t("orStep1Desc")}</p>
-              <p class="mt-2 rounded-md border border-amber-800/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">${t("orStep1Note")}</p>
+              <p class="text-sm font-medium text-zinc-200">${cfg.step1Title}</p>
+              <p class="mt-1 text-xs text-zinc-500">${cfg.step1Desc}</p>
+              ${cfg.step1Note ? `<p class="mt-2 rounded-md border border-amber-800/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">${cfg.step1Note}</p>` : ""}
             </div>
           </div>
 
           <!-- Security note -->
           <div class="rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-400">
-            ${t("orSecurityNote")}
+            ${cfg.securityNote}
           </div>
 
           <!-- Step 2: Paste key -->
           <div class="flex gap-3">
             <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">2</div>
             <div class="w-full pt-0.5">
-              <p class="mb-2 text-sm font-medium text-zinc-200">${lang === "zh" ? "粘贴 Management Key" : "Paste your Management Key"}</p>
-              <input id="orApiKeyInput" type="password"
-                placeholder="${t("orKeyPlaceholder")}"
+              <p class="mb-2 text-sm font-medium text-zinc-200">${cfg.pasteLabel}</p>
+              <input id="apiKeyInput" type="password"
+                placeholder="${cfg.placeholder}"
                 class="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100
                        placeholder-zinc-600 focus:border-indigo-500 focus:outline-none" />
-              <div id="orKeyError" class="mt-2 hidden text-xs text-red-400"></div>
+              <div id="apiKeyError" class="mt-2 hidden text-xs text-red-400"></div>
             </div>
           </div>
 
-          <button id="orSaveBtn" type="button" onclick="saveOpenRouterKey()"
+          <button id="apiKeySaveBtn" type="button" onclick="saveApiKey('${platformId}')"
             class="w-full rounded-md bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
             ${t("orSaveBtn")}
           </button>
         </div>`;
     }
 
-    async function saveOpenRouterKey() {
-      const input = document.getElementById("orApiKeyInput");
-      const errEl = document.getElementById("orKeyError");
-      const btn   = document.getElementById("orSaveBtn");
+    async function saveApiKey(platformId) {
+      const cfg   = getApiKeyConfig(platformId);
+      const input = document.getElementById("apiKeyInput");
+      const errEl = document.getElementById("apiKeyError");
+      const btn   = document.getElementById("apiKeySaveBtn");
       const key   = (input?.value || "").trim();
 
       errEl.classList.add("hidden");
-      if (!key.startsWith("sk-or-")) {
-        errEl.textContent = t("orKeyError");
+      if (!key.startsWith(cfg.keyPrefix)) {
+        errEl.textContent = cfg.keyError;
         errEl.classList.remove("hidden");
         return;
       }
@@ -918,23 +974,23 @@
       btn.disabled = true;
       btn.textContent = t("orSavingBtn");
       try {
-        const r = await fetch("/api/platforms/openrouter/apikey", {
+        const r = await fetch(`/api/platforms/${platformId}/apikey`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ api_key: key }),
         });
         if (r.ok) {
           await loadPlatforms();
-          showSetupSuccess(["openrouter"]);
+          showSetupSuccess([platformId]);
         } else {
           const err = await r.json().catch(() => ({}));
-          errEl.textContent = err.detail || t("orSaveError");
+          errEl.textContent = err.detail || cfg.saveError;
           errEl.classList.remove("hidden");
           btn.disabled = false;
           btn.textContent = t("orSaveBtn");
         }
       } catch(e) {
-        errEl.textContent = t("orSaveError");
+        errEl.textContent = cfg.saveError;
         errEl.classList.remove("hidden");
         btn.disabled = false;
         btn.textContent = t("orSaveBtn");
@@ -1042,7 +1098,8 @@
 
     function openReimport(platformId, displayName) {
       // API-key platforms use the key setup wizard instead of file upload
-      if (platformId === "openrouter") {
+      const platformInfo = allPlatforms.find(p => p.id === platformId);
+      if (platformInfo && platformInfo.type === "api_key") {
         openSetupWizard(platformId);
         return;
       }
@@ -1145,9 +1202,10 @@
       let defaultChecked;
 
       if (pickerSelected.size > 0) {
-        // Picker flow: only show what the user deliberately selected
-        platforms = allPlatforms.filter(p => pickerSelected.has(p.id) && foundInJson.has(p.id));
-        // Default = all selected (user already made the choice in the picker)
+        // Picker flow: show all picker-selected platforms regardless of JSON detection.
+        // The user already made their selection; foundInJson can miss platforms when
+        // the extension hasn't been reloaded yet or the trigger page wasn't visited.
+        platforms = allPlatforms.filter(p => pickerSelected.has(p.id));
         defaultChecked = new Set(platforms.map(p => p.id));
       } else {
         // Re-import flow: show everything in the JSON

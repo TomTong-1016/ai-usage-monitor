@@ -419,6 +419,30 @@ def parse_cursor(data: dict) -> list[Metric]:
     return metrics
 
 
+def parse_siliconflow(data: dict) -> list[Metric]:
+    UNIT = 1e12  # values are in pico-yuan; divide to get CNY
+    metrics = []
+
+    financial = ((data.get("peek") or {}).get("data") or {}).get("financialInfo") or {}
+    available = float(financial.get("available") or 0) / UNIT
+    metrics.append(Metric(platform="siliconflow", label="账户余额", used=round(available, 4), total=None, unit="CNY"))
+
+    wallets = ((data.get("wallets") or {}).get("data") or {}).get("wallets") or []
+    if wallets:
+        coupon_total = sum(float(w.get("balance") or 0) / UNIT for w in wallets)
+        earliest_expiry = min((w["expiresAt"] for w in wallets if w.get("expiresAt")), default=None)
+        metrics.append(Metric(
+            platform="siliconflow",
+            label="优惠券余额",
+            used=round(coupon_total, 4),
+            total=None,
+            unit="CNY",
+            reset_time=_time(earliest_expiry),
+        ))
+
+    return metrics
+
+
 PARSERS = {
     "claude": parse_claude,
     "codex": parse_codex,
@@ -430,4 +454,5 @@ PARSERS = {
     "antigravity_ide": parse_antigravity_ide,
     "openrouter": parse_openrouter,
     "cursor": parse_cursor,
+    "siliconflow": parse_siliconflow,
 }

@@ -83,6 +83,89 @@ async def test_fetch_platform_posts_json_with_cookies(tmp_path):
     assert route.called
 
 
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_platform_codex_prefers_app_server_usage(monkeypatch, tmp_path):
+    import fetcher
+
+    cookie_dir = tmp_path / "cookie"
+    cookie_dir.mkdir()
+    write_cookie_file(cookie_dir / "chatgpt.com_cookies.txt", [(".chatgpt.com", "__Secure-next-auth.session-token", "abc")])
+    monkeypatch.setattr(fetcher, "ROOT", tmp_path)
+    route = respx.get("https://chatgpt.com/backend-api/wham/usage").mock(
+        return_value=httpx.Response(401, json={"detail": "Unauthorized"})
+    )
+    monkeypatch.setattr(fetcher, "fetch_codex_app_server_usage", lambda timeout=10.0: {
+        "source": "codex-app-server",
+        "rate_limit": {
+            "primary_window": {"used_percent": 21},
+            "secondary_window": {"used_percent": 55},
+        },
+    })
+
+    data = await fetch_platform(fetcher.PLATFORMS["codex"])
+
+    assert data["rate_limit"]["primary_window"]["used_percent"] == 21
+    assert data["source"] == "codex-app-server"
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_platform_codex_uses_direct_usage_api_when_app_server_unavailable(monkeypatch, tmp_path):
+    import fetcher
+
+    cookie_dir = tmp_path / "cookie"
+    cookie_dir.mkdir()
+    write_cookie_file(cookie_dir / "chatgpt.com_cookies.txt", [(".chatgpt.com", "__Secure-next-auth.session-token", "abc")])
+    monkeypatch.setattr(fetcher, "ROOT", tmp_path)
+    monkeypatch.setattr(fetcher, "fetch_codex_app_server_usage", lambda timeout=10.0: (_ for _ in ()).throw(FileNotFoundError()))
+    route = respx.get("https://chatgpt.com/backend-api/wham/usage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "rate_limit": {
+                    "primary_window": {"used_percent": 15},
+                    "secondary_window": {"used_percent": 47},
+                }
+            },
+        )
+    )
+
+    data = await fetch_platform(fetcher.PLATFORMS["codex"])
+
+    assert data["rate_limit"]["primary_window"]["used_percent"] == 15
+    assert data["source"] == "codex-wham-api"
+    assert route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_platform_codex_auth_failure_falls_back_to_cache(monkeypatch, tmp_path):
+    import fetcher
+
+    cookie_dir = tmp_path / "cookie"
+    cookie_dir.mkdir()
+    write_cookie_file(cookie_dir / "chatgpt.com_cookies.txt", [(".chatgpt.com", "__Secure-next-auth.session-token", "abc")])
+    monkeypatch.setattr(fetcher, "ROOT", tmp_path)
+    monkeypatch.setattr(fetcher, "fetch_codex_app_server_usage", lambda timeout=10.0: (_ for _ in ()).throw(FileNotFoundError()))
+    monkeypatch.setattr(fetcher, "fetch_codex_app_cache_usage", lambda: {
+        "source": "codex-app-cache",
+        "rate_limit": {
+            "primary_window": {"used_percent": 7},
+            "secondary_window": {"used_percent": 47},
+        },
+    })
+    respx.get("https://chatgpt.com/backend-api/wham/usage").mock(
+        return_value=httpx.Response(401, json={"detail": "Unauthorized"})
+    )
+
+    data = await fetch_platform(fetcher.PLATFORMS["codex"])
+
+    assert data["rate_limit"]["primary_window"]["used_percent"] == 7
+    assert data["source"] == "codex-app-cache"
+
+
 def test_load_request_override_missing():
     assert load_request_override("missing-platform") == {}
 

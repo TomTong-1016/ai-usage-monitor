@@ -43,8 +43,9 @@ PLATFORM_META: dict[str, dict] = {
     "trae":        {"type": "cookie_header", "display_name": "Trae"},
     "minimax":     {"type": "cookie_header", "display_name": "MiniMax"},
     "deepseek":    {"type": "cookie_header", "display_name": "DeepSeek"},
-    "openrouter":  {"type": "api_key",       "display_name": "OpenRouter"},
-    "cursor":      {"type": "local_app",     "display_name": "Cursor"},
+    "openrouter":   {"type": "api_key",       "display_name": "OpenRouter"},
+    "cursor":       {"type": "local_app",     "display_name": "Cursor"},
+    "siliconflow":  {"type": "cookie_header",  "display_name": "硅基流动"},
 }
 
 

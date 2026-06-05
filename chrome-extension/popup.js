@@ -57,9 +57,20 @@ const PLATFORMS = [
   {
     id: "codex",
     name: "Codex",
-    localApp: true,   // Reads from ~/Library/Application Support/Codex/Cache — no cookies needed
-    guideUrl: "https://github.com/openai/codex",
-    guideText: "安装并打开 Codex App 即可，无需 Cookie",
+    cookieDomain: "chatgpt.com",
+    cookieFile: "chatgpt.com_cookies.txt",
+    headerFile: "codex-header.txt",
+    guideUrl: "https://chatgpt.com",
+    guideText: "访问 ChatGPT 并触发一次 Codex/wham usage 请求",
+  },
+  {
+    id: "siliconflow",
+    name: "硅基流动",
+    cookieDomain: "cloud.siliconflow.cn",
+    cookieFile: "cloud.siliconflow.cn_cookies.txt",
+    headerFile: "siliconflow-header.txt",
+    guideUrl: "https://cloud.siliconflow.cn/me/expensebill",
+    guideText: "访问硅基流动账单页触发余额请求",
   },
 ];
 
@@ -228,6 +239,7 @@ async function exportCredentials(statuses) {
     const storageKeys = [
       "claude_org_id",
       "header_claude-header.txt",
+      "header_codex-header.txt",
       "header_trae-header.txt",
       "header_minimax-header.txt",
       "header_qwen-header.txt",
@@ -237,6 +249,7 @@ async function exportCredentials(statuses) {
       "header_deepseek-summary.txt",
       "header_deepseek-cost.txt",
       "header_deepseek-amount.txt",
+      "header_siliconflow-header.txt",
     ];
     const stored = await getStorageKeys(storageKeys);
 
@@ -257,6 +270,7 @@ async function exportCredentials(statuses) {
     // Headers
     const headerMap = {
       "claude-header.txt": "header_claude-header.txt",
+      "codex-header.txt": "header_codex-header.txt",
       "trae-header.txt": "header_trae-header.txt",
       "minimax-header.txt": "header_minimax-header.txt",
       "qwen-header.txt": "header_qwen-header.txt",
@@ -265,7 +279,8 @@ async function exportCredentials(statuses) {
       "deepseek-header3.txt": "header_deepseek-header3.txt",
       "deepseek-summary.txt": "header_deepseek-summary.txt",
       "deepseek-cost.txt": "header_deepseek-cost.txt",
-      "deepseek-amount.txt": "header_deepseek-amount.txt",
+      "deepseek-amount.txt":      "header_deepseek-amount.txt",
+      "siliconflow-header.txt":   "header_siliconflow-header.txt",
     };
     for (const [filename, storageKey] of Object.entries(headerMap)) {
       if (stored[storageKey]) {
