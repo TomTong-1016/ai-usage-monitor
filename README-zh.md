@@ -7,11 +7,11 @@
 ![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey?logo=apple)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 
-本地 dashboard，聚合监控多个 AI 平台的用量（Claude、Trae、Kimi、MiniMax、DeepSeek、Codex、Google Antigravity），每 30 秒自动刷新。
+本地 dashboard，聚合监控多个 AI 平台的用量（Claude、Trae、Kimi、MiniMax、DeepSeek、Codex、Google Antigravity、Antigravity IDE、Cursor、OpenRouter、硅基流动），每 30 秒自动刷新。
 
 **为什么做这个：** 大多数 AI 平台把用量和额度信息散落在各自页面，同时订阅多个平台时频繁切换 Tab 查看限额非常麻烦。这个工具把所有平台汇总到一处，自动刷新，不需要任何 API Key。
 
-认证方式：通过配套 Chrome 插件一键导出浏览器 Cookie 和 Auth Headers，**无需手动复制粘贴，无需 API Key**。Codex、Google Antigravity 直接读取本地 App 数据，无需任何配置。
+认证方式：通过配套 Chrome 插件一键导出浏览器 Cookie 和 Auth Headers，**无需手动复制粘贴**。Codex、Google Antigravity、Antigravity IDE、Cursor 直接读取本地 App 数据，无需任何配置。OpenRouter 仅需填写 API Key。
 
 ---
 
@@ -46,9 +46,11 @@ venv/bin/uvicorn server:app --host 127.0.0.1 --port 8765
 
 启动后页面为空白状态，点击 **「+ 添加平台」** 按钮，从弹窗中选择你使用的平台：
 
-**本地 App 类（Codex、Antigravity）**：点击「检测并启用」，服务端自动读取本地 App 数据，无需任何配置。
+**本地 App 类（Codex、Antigravity、Antigravity IDE、Cursor）**：点击「检测并启用」，服务端自动读取本地 App 数据，无需任何配置。
 
-**需要 Chrome 插件的平台（Claude、Kimi、Trae、MiniMax、DeepSeek）**：向导会引导你完成以下步骤：
+**API Key 类（OpenRouter）**：点击「配置」，在弹窗中填入 API Key 即可。
+
+**需要 Chrome 插件的平台（Claude、Kimi、Trae、MiniMax、DeepSeek、硅基流动）**：向导会引导你完成以下步骤：
 
 1. 安装 Chrome 插件（加载 `chrome-extension/` 目录为开发者扩展）
 2. 在 Chrome 中登录对应平台，并访问向导中指定的页面（让插件在后台捕获 Auth Headers）
@@ -69,6 +71,10 @@ venv/bin/uvicorn server:app --host 127.0.0.1 --port 8765
 | DeepSeek | Cookie + Auth Header | ✅ 需触发 API | 2 分钟 | 账户余额、用量 |
 | Codex | 本地 App 磁盘缓存 | ❌ 无需配置 | 30 秒 | 速率限制、Credits |
 | Google Antigravity | 本地 Language Server | ❌ 无需配置 | 30 秒 | 模型可用状态 |
+| Antigravity IDE | 本地 Language Server | ❌ 无需配置 | 30 秒 | AI Credits |
+| Cursor | 本地 App | ❌ 无需配置 | 30 秒 | 套餐用量、On-demand 消费 |
+| OpenRouter | API Key | ❌ 填写 API Key | 30 秒 | 账户余额、累计消费、累计充值 |
+| 硅基流动 | Cookie + Auth Header | ✅ 需触发 API | 30 秒 | 账户余额、近1天/近1周用量 |
 
 ---
 

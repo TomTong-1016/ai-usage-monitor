@@ -7,11 +7,11 @@
 ![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey?logo=apple)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 
-A local dashboard that aggregates usage metrics from multiple AI platforms — Claude, Trae, Kimi, MiniMax, DeepSeek, Codex, and Google Antigravity — with automatic refresh every 30 seconds.
+A local dashboard that aggregates usage metrics from multiple AI platforms — Claude, Trae, Kimi, MiniMax, DeepSeek, Codex, Google Antigravity, Antigravity IDE, Cursor, OpenRouter, and SiliconFlow — with automatic refresh every 30 seconds.
 
 **Why this exists:** Most AI platforms bury their usage and quota data on separate pages. When you're juggling 5+ subscriptions, constantly switching tabs to check limits is tedious. This tool pulls everything into one place, refreshes automatically, and requires zero API keys.
 
-Authentication is handled via a companion Chrome extension that exports browser cookies and auth headers in one click. **No manual copy-pasting. No API keys.** Codex and Google Antigravity read from local app data directly and require zero configuration.
+Authentication is handled via a companion Chrome extension that exports browser cookies and auth headers in one click. **No manual copy-pasting.** Codex, Google Antigravity, Antigravity IDE, and Cursor read from local app data directly — zero configuration. OpenRouter only needs an API key.
 
 ---
 
@@ -46,9 +46,11 @@ Open **http://localhost:8765** in your browser.
 
 The page starts empty. Click **"+ Add Platform"** and pick from the modal.
 
-**Local App platforms (Codex, Antigravity)** — Click "Detect & Enable". The server reads data directly from the local app on disk. No configuration needed.
+**Local App platforms (Codex, Antigravity, Antigravity IDE, Cursor)** — Click "Detect & Enable". The server reads data directly from the local app on disk. No configuration needed.
 
-**Chrome extension platforms (Claude, Kimi, Trae, MiniMax, DeepSeek)** — The setup wizard walks you through:
+**API Key platforms (OpenRouter)** — Click "Configure" and enter your API key in the dialog.
+
+**Chrome extension platforms (Claude, Kimi, Trae, MiniMax, DeepSeek, SiliconFlow)** — The setup wizard walks you through:
 
 1. Load `chrome-extension/` as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked)
 2. Log in to the platform in Chrome and visit the page shown in the wizard (so the extension can capture Auth Headers in the background)
@@ -69,6 +71,10 @@ After upload the server writes all credential files, detects every ready platfor
 | DeepSeek | Cookie + Auth Header | ✅ Trigger API | 2 min | Balance, usage |
 | Codex | Local app disk cache | ❌ None | 30 s | Rate limits, credits |
 | Google Antigravity | Local Language Server | ❌ None | 30 s | Model availability |
+| Antigravity IDE | Local Language Server | ❌ None | 30 s | AI credits |
+| Cursor | Local app | ❌ None | 30 s | Plan quota, on-demand spend |
+| OpenRouter | API Key | ❌ API key only | 30 s | Balance, usage, total credits |
+| SiliconFlow | Cookie + Auth Header | ✅ Trigger API | 30 s | Balance, daily/weekly usage |
 
 ---
 
