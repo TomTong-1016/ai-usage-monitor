@@ -427,6 +427,30 @@ def parse_siliconflow(data: dict) -> list[Metric]:
     available = float(financial.get("available") or 0) / UNIT
     metrics.append(Metric(platform="siliconflow", label="账户余额", used=round(available, 4), total=None, unit="CNY"))
 
+    def _net_amount(payload):
+        return float(((payload or {}).get("data") or {}).get("netAmount") or 0)
+
+    day_date = data.get("day_date") or ""
+    week_start = data.get("week_start_date") or ""
+    week_end = data.get("week_end_date") or ""
+
+    metrics.append(Metric(
+        platform="siliconflow",
+        label="近1天用量",
+        used=round(_net_amount(data.get("day_amount")), 4),
+        total=None,
+        unit="CNY",
+        subtitle=day_date or None,
+    ))
+    metrics.append(Metric(
+        platform="siliconflow",
+        label="近7天用量",
+        used=round(_net_amount(data.get("week_amount")), 4),
+        total=None,
+        unit="CNY",
+        subtitle=f"{week_start} ~ {week_end}" if week_start and week_end else None,
+    ))
+
     wallets = ((data.get("wallets") or {}).get("data") or {}).get("wallets") or []
     if wallets:
         coupon_total = sum(float(w.get("balance") or 0) / UNIT for w in wallets)

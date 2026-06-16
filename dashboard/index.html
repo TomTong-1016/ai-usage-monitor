@@ -556,6 +556,15 @@
     // ── Metric label translation ────────────────────────────────────────────────
     // Server always returns Chinese labels; map them to English when lang === "en".
 
+    const PLATFORM_NAME_ZH_TO_EN = {
+      "硅基流动": "SiliconFlow",
+    };
+
+    function translateDisplayName(name) {
+      if (lang !== "en") return name;
+      return PLATFORM_NAME_ZH_TO_EN[name] || name;
+    }
+
     const LABEL_ZH_TO_EN = {
       "5小时用量":  "5-hour Usage",
       "本周用量":   "Weekly Usage",
@@ -579,9 +588,18 @@
       [" 用量",   " Usage"],
     ];
 
+    // Prefix replacements for labels carrying a trailing date, e.g. "近1天用量 (06-16)"
+    const LABEL_PREFIX_ZH_TO_EN = [
+      ["近1天用量", "1-Day Usage"],
+      ["近7天用量", "7-Day Usage"],
+    ];
+
     function translateLabel(label) {
       if (lang !== "en") return label;
       if (LABEL_ZH_TO_EN[label]) return LABEL_ZH_TO_EN[label];
+      for (const [zh, en] of LABEL_PREFIX_ZH_TO_EN) {
+        if (label.startsWith(zh)) return en + label.slice(zh.length);
+      }
       for (const [zh, en] of LABEL_SUFFIX_ZH_TO_EN) {
         if (label.endsWith(zh)) return label.slice(0, -zh.length) + en;
       }
@@ -600,7 +618,7 @@
             <div class="relative h-2 overflow-hidden rounded-sm bg-zinc-800">
               <div class="h-full ${barColor(v)}" style="width:${v}%"></div>
             </div>` : ""}
-          <div class="min-h-5 text-xs text-zinc-500">${resetTxt(m.reset_time)}</div>
+          <div class="min-h-5 text-xs text-zinc-500">${m.subtitle || resetTxt(m.reset_time)}</div>
         </div>`;
     }
 
@@ -608,7 +626,9 @@
       // For platforms with many metrics, show a subset + "View" button
       const hasDetails =
         (result.platform === "deepseek" && result.metrics.some(m => m.unit === "次" || m.unit === "tokens")) ||
-        ((result.platform === "antigravity" || result.platform === "antigravity_ide") && result.metrics.length > 2);
+        (result.platform === "antigravity" && result.metrics.length > 2) ||
+        (result.platform === "antigravity_ide" && result.metrics.length > 3) ||
+        (result.platform === "siliconflow" && result.metrics.length > 3);
 
       const detailsBtn = hasDetails ? `
         <button class="mt-4 inline-flex h-8 items-center rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
@@ -618,10 +638,17 @@
       let previewMetrics;
       if (result.platform === "deepseek") {
         previewMetrics = result.metrics.filter(m => m.unit !== "次" && m.unit !== "tokens");
-      } else if (result.platform === "antigravity" || result.platform === "antigravity_ide") {
+      } else if (result.platform === "antigravity_ide") {
+        const FEATURED = new Set(["Gemini 3.5 Flash (High)", "Claude Opus 4.6 (Thinking)", "GPT-OSS 120B (Medium)"]);
+        const all = orderedMetrics(result);
+        const featured = all.filter(m => FEATURED.has(m.label));
+        previewMetrics = featured.length ? featured : all.slice(0, 3);
+      } else if (result.platform === "antigravity") {
         const all = orderedMetrics(result);
         const featured = all.filter(m => m.label.includes("Flash"));
         previewMetrics = featured.length ? featured : all.slice(0, 2);
+      } else if (result.platform === "siliconflow") {
+        previewMetrics = result.metrics.filter(m => m.label !== "优惠券余额");
       } else {
         previewMetrics = result.metrics;
       }
@@ -639,11 +666,11 @@
           <!-- Hover action buttons (top-right) -->
           <div style="position:absolute;right:12px;top:12px;display:none;" class="card-actions items-center gap-1.5">
             ${needsImport ? `<button
-              onclick="openReimport('${result.platform}', '${result.display_name}')"
+              onclick="openReimport('${result.platform}', '${translateDisplayName(result.display_name)}')"
               class="h-6 inline-flex items-center justify-center rounded-md border border-zinc-700 px-1.5 text-xs text-zinc-500 hover:border-indigo-600 hover:text-indigo-400"
               type="button" title="${t('cardReimportTitle')}">↑</button>` : ''}
             <button
-              onclick="confirmRemove('${result.platform}', '${result.display_name}')"
+              onclick="confirmRemove('${result.platform}', '${translateDisplayName(result.display_name)}')"
               class="h-6 w-6 inline-flex items-center justify-center rounded-md border border-zinc-700 text-xs text-zinc-500 hover:border-red-700 hover:text-red-400"
               type="button" title="${t('cardRemoveTitle')}">✕</button>
           </div>
@@ -652,7 +679,7 @@
           <div class="mb-4 flex items-center gap-3">
             <img class="h-9 w-9 rounded-md bg-zinc-800 object-cover shrink-0" src="${LOGOS[result.platform] || ''}" alt="" />
             <div class="min-w-0">
-              <h2 class="truncate text-base font-semibold">${result.display_name}</h2>
+              <h2 class="truncate text-base font-semibold">${translateDisplayName(result.display_name)}</h2>
               <p class="text-xs text-zinc-500">${new Date(result.last_updated).toLocaleString()}</p>
             </div>
             ${hasDetails ? `<button
@@ -692,7 +719,7 @@
       const result = latestResults.find(r => r.platform === platform);
       if (!result) return;
       modalScreen = "details";
-      openModal(result.display_name + t("detailsSuffix"));
+      openModal(translateDisplayName(result.display_name) + t("detailsSuffix"));
       document.getElementById("modalBack").classList.add("hidden");
       document.getElementById("modalBody").innerHTML = `
         <div class="space-y-4">
@@ -757,7 +784,7 @@
                 ? 'border-zinc-700 opacity-40 cursor-not-allowed'
                 : 'border-zinc-700 hover:border-indigo-500 hover:bg-zinc-900 cursor-pointer'}">
             <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
-            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+            <span class="text-xs font-medium text-zinc-200">${translateDisplayName(p.display_name)}</span>
             ${already ? `<span class="text-xs text-zinc-500">${t("platformAdded")}</span>` : ''}
           </button>`;
       }
@@ -769,7 +796,7 @@
           return `
             <div class="flex flex-col items-center gap-2 rounded-lg border border-zinc-700 p-3 text-center opacity-40 cursor-not-allowed">
               <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
-              <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+              <span class="text-xs font-medium text-zinc-200">${translateDisplayName(p.display_name)}</span>
               <span class="text-xs text-zinc-500">${t("platformAdded")}</span>
             </div>`;
         }
@@ -781,7 +808,7 @@
                 : 'border-zinc-700 hover:border-indigo-400 hover:bg-zinc-900'}">
             ${selected ? `<span class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-white text-[10px] font-bold">✓</span>` : ''}
             <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
-            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+            <span class="text-xs font-medium text-zinc-200">${translateDisplayName(p.display_name)}</span>
           </button>`;
       }
 
@@ -798,7 +825,7 @@
                 ? 'border-zinc-700 opacity-40 cursor-not-allowed'
                 : 'border-zinc-700 hover:border-indigo-500 hover:bg-zinc-900 cursor-pointer'}">
             <img src="${LOGOS[p.id] || ''}" class="h-10 w-10 rounded-lg bg-zinc-800 object-cover" alt="" />
-            <span class="text-xs font-medium text-zinc-200">${p.display_name}</span>
+            <span class="text-xs font-medium text-zinc-200">${translateDisplayName(p.display_name)}</span>
             ${already ? `<span class="text-xs text-zinc-500">${t("platformAdded")}</span>` : ''}
           </button>`;
       }
@@ -877,7 +904,7 @@
       const guides = getGuides();
       const guide = guides[platformId] || {};
       const p = allPlatforms.find(x => x.id === platformId);
-      openModal(`${lang === "zh" ? "添加" : "Add"} ${p ? p.display_name : platformId}`);
+      openModal(`${lang === "zh" ? "添加" : "Add"} ${p ? translateDisplayName(p.display_name) : platformId}`);
       document.getElementById("modalBack").classList.remove("hidden");
 
       if (guide.type === "local_app") {
@@ -1252,7 +1279,7 @@
               ${checked ? '<svg viewBox="0 0 12 12" class="h-3 w-3 text-white"><polyline points="1,6 4,10 11,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
             </span>
             <img src="${LOGOS[p.id] || ''}" class="h-6 w-6 rounded bg-zinc-800 object-cover" alt="" />
-            <span class="flex-1 text-sm font-medium text-zinc-200">${p.display_name}</span>
+            <span class="flex-1 text-sm font-medium text-zinc-200">${translateDisplayName(p.display_name)}</span>
             <span class="text-xs ${hintColor}">${hint}</span>
           </div>`;
       }
@@ -1345,7 +1372,7 @@
       const displayIds = newlyEnabled.length ? newlyEnabled : readyPlatforms;
       const names = displayIds.map(id => {
         const p = allPlatforms.find(x => x.id === id);
-        return p ? p.display_name : id;
+        return p ? translateDisplayName(p.display_name) : id;
       });
       const title = newlyEnabled.length ? t("successEnabled") :
         (names.length ? t("successReady") : t("successNone"));

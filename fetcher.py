@@ -893,15 +893,37 @@ async def fetch_siliconflow_usage(config: PlatformConfig, timeout: float) -> dic
     jar = _load_cookie_jar_for_request(config, override)
     headers = merge_headers(build_headers(config, jar), override.get("headers", {}))
     base = "https://cloud.siliconflow.cn/walletd-server/api/v1/subject"
+    bill = "https://cloud.siliconflow.cn/panel-server/api/v1/bill/aggregate_amount"
+
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_today = start_today + timedelta(days=1) - timedelta(milliseconds=1)
+    start_7d = start_today - timedelta(days=6)
+    day_start_ms = int(start_today.timestamp() * 1000)
+    week_start_ms = int(start_7d.timestamp() * 1000)
+    end_ms = int(end_today.timestamp() * 1000)
 
     async with httpx.AsyncClient(cookies=jar, timeout=timeout, follow_redirects=True) as client:
-        peek_resp, wallets_resp = await _asyncio.gather(
+        peek_resp, wallets_resp, day_resp, week_resp = await _asyncio.gather(
             client.get(f"{base}/profile/peek", headers=headers),
             client.get(f"{base}/wallets?pageSize=1000&stage=3", headers=headers),
+            client.get(bill, params={"startTime": day_start_ms, "endTime": end_ms}, headers=headers),
+            client.get(bill, params={"startTime": week_start_ms, "endTime": end_ms}, headers=headers),
         )
     peek_resp.raise_for_status()
     wallets_resp.raise_for_status()
-    return {"peek": peek_resp.json(), "wallets": wallets_resp.json()}
+    day_resp.raise_for_status()
+    week_resp.raise_for_status()
+    return {
+        "peek": peek_resp.json(),
+        "wallets": wallets_resp.json(),
+        "day_amount": day_resp.json(),
+        "week_amount": week_resp.json(),
+        "day_date": start_today.strftime("%m-%d"),
+        "week_start_date": start_7d.strftime("%m-%d"),
+        "week_end_date": start_today.strftime("%m-%d"),
+    }
 
 
 async def fetch_openrouter_usage(timeout: float) -> dict[str, Any]:
