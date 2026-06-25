@@ -9,6 +9,7 @@ class Metric(BaseModel):
     total: Optional[float] = None
     unit: str  # "%" or "$"
     reset_time: Optional[str] = None
+    reset_times: Optional[list[str]] = None
     subtitle: Optional[str] = None
 
 

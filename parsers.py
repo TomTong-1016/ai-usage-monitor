@@ -24,6 +24,18 @@ def _time(value) -> str | None:
     return str(value)
 
 
+def _first_nested(data: dict, names: tuple[str, ...], default=None):
+    for name in names:
+        if name in data:
+            return data[name]
+    for value in data.values():
+        if isinstance(value, dict):
+            found = _first_nested(value, names)
+            if found is not None:
+                return found
+    return default
+
+
 def _parse_usage_windows(data: dict, platform: str) -> list[Metric]:
     metrics = []
     for key, label in [("five_hour", "5小时用量"), ("seven_day", "本周用量")]:
@@ -69,6 +81,62 @@ def parse_codex(data: dict) -> list[Metric]:
                 unit="%",
                 reset_time=_time(secondary.get("reset_at")),
             ))
+        reset_credit_details = (
+            data.get("rate_limit_reset_credit_details")
+            or data.get("rateLimitResetCreditDetails")
+            or {}
+        )
+        reset_credit_items = reset_credit_details.get("credits") if isinstance(reset_credit_details, dict) else []
+        if isinstance(reset_credit_items, list):
+            available_items = [
+                item for item in reset_credit_items
+                if isinstance(item, dict)
+                and item.get("reset_type") == "codex_rate_limits"
+                and item.get("status") == "available"
+            ]
+            reset_times = [
+                _time(item.get("expires_at") or item.get("expiresAt"))
+                for item in available_items
+            ]
+            reset_times = [reset_time for reset_time in reset_times if reset_time]
+            if available_items:
+                metrics.append(Metric(
+                    platform="codex",
+                    label="可用重置次数",
+                    used=len(available_items),
+                    total=None,
+                    unit="次",
+                    reset_times=reset_times or None,
+                ))
+                return metrics
+
+        reset_credits = (
+            data.get("rate_limit_reset_credits")
+            or data.get("rateLimitResetCredits")
+            or rate_limit.get("rate_limit_reset_credits")
+            or rate_limit.get("rateLimitResetCredits")
+            or {}
+        )
+        if isinstance(reset_credits, dict):
+            available_count = _first_nested(reset_credits, ("availableCount", "available_count", "count"))
+            if available_count not in (None, ""):
+                expires_at = _first_nested(reset_credits, (
+                    "expiresAt",
+                    "expires_at",
+                    "expiration",
+                    "expirationTime",
+                    "expiration_time",
+                    "reset_at",
+                    "resetsAt",
+                ))
+                metrics.append(Metric(
+                    platform="codex",
+                    label="可用重置次数",
+                    used=_num(available_count),
+                    total=None,
+                    unit="次",
+                    reset_time=_time(expires_at),
+                ))
         return metrics
     return _parse_usage_windows(data, "codex")
 

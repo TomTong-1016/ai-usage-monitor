@@ -70,6 +70,62 @@ def test_parse_codex_wham_usage():
     assert weekly.used == 57
 
 
+def test_parse_codex_reset_credits():
+    data = {
+        "rate_limit": {
+            "primary_window": {"used_percent": 77, "reset_at": 1778825875},
+            "secondary_window": {"used_percent": 57, "reset_at": 1779173505},
+        },
+        "rate_limit_reset_credits": {
+            "availableCount": 2,
+            "expiresAt": 1779432705,
+        },
+    }
+
+    metrics = parse_codex(data)
+
+    reset_credits = next(m for m in metrics if m.label == "可用重置次数")
+    assert reset_credits.used == 2
+    assert reset_credits.unit == "次"
+    assert reset_credits.reset_time == "2026-05-22T06:51:45+00:00"
+
+
+def test_parse_codex_reset_credit_details():
+    data = {
+        "rate_limit": {
+            "primary_window": {"used_percent": 77, "reset_at": 1778825875},
+            "secondary_window": {"used_percent": 57, "reset_at": 1779173505},
+        },
+        "rate_limit_reset_credits": {"availableCount": 2},
+        "rate_limit_reset_credit_details": {
+            "credits": [
+                {
+                    "id": "credit-1",
+                    "reset_type": "codex_rate_limits",
+                    "status": "available",
+                    "expires_at": "2026-07-12T04:05:38.165432Z",
+                },
+                {
+                    "id": "credit-2",
+                    "reset_type": "codex_rate_limits",
+                    "status": "available",
+                    "expires_at": "2026-07-18T00:39:55.551568Z",
+                },
+            ]
+        },
+    }
+
+    metrics = parse_codex(data)
+    reset_credits = next(m for m in metrics if m.label == "可用重置次数")
+
+    assert reset_credits.used == 2
+    assert reset_credits.unit == "次"
+    assert reset_credits.reset_times == [
+        "2026-07-12T04:05:38.165432Z",
+        "2026-07-18T00:39:55.551568Z",
+    ]
+
+
 # Kimi tests
 def test_parse_kimi_returns_two_metrics(kimi_data):
     metrics = parse_kimi(kimi_data)
@@ -300,4 +356,3 @@ def test_parse_antigravity_ide_reads_credits_and_model_quota():
     assert model.total == 100
     assert model.platform == "antigravity_ide"
     assert model.reset_time == "2026-05-27T02:20:38Z"
-

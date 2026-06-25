@@ -553,6 +553,19 @@
       return isNaN(d) ? "" : `${t("resetPrefix")} ${d.toLocaleString()}`;
     }
 
+    function fmtDateTime(d) {
+      const pad = value => String(value).padStart(2, "0");
+      return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function resetTimesTxt(values) {
+      if (!Array.isArray(values) || values.length === 0) return "";
+      return values.map(v => {
+        const d = new Date(v);
+        return isNaN(d) ? "" : fmtDateTime(d);
+      }).filter(Boolean).join("<br>");
+    }
+
     // ── Metric label translation ────────────────────────────────────────────────
     // Server always returns Chinese labels; map them to English when lang === "en".
 
@@ -578,6 +591,7 @@
       "套餐用量":  "Plan Usage",
       "按需消费":  "On-Demand Spend",
       "赠送余额":  "Gift Credits",
+      "可用重置次数": "Available Resets",
       "账户余额":  "Balance",
       "优惠券余额": "Coupon Balance",
     };
@@ -618,7 +632,7 @@
             <div class="relative h-2 overflow-hidden rounded-sm bg-zinc-800">
               <div class="h-full ${barColor(v)}" style="width:${v}%"></div>
             </div>` : ""}
-          <div class="min-h-5 text-xs text-zinc-500">${m.subtitle || resetTxt(m.reset_time)}</div>
+          <div class="min-h-5 text-xs leading-relaxed text-zinc-500">${resetTimesTxt(m.reset_times) || m.subtitle || resetTxt(m.reset_time)}</div>
         </div>`;
     }
 
@@ -627,8 +641,7 @@
       const hasDetails =
         (result.platform === "deepseek" && result.metrics.some(m => m.unit === "次" || m.unit === "tokens")) ||
         (result.platform === "antigravity" && result.metrics.length > 2) ||
-        (result.platform === "antigravity_ide" && result.metrics.length > 3) ||
-        (result.platform === "siliconflow" && result.metrics.length > 3);
+        (result.platform === "antigravity_ide" && result.metrics.length > 3);
 
       const detailsBtn = hasDetails ? `
         <button class="mt-4 inline-flex h-8 items-center rounded-md border border-zinc-700 px-3 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
@@ -647,8 +660,6 @@
         const all = orderedMetrics(result);
         const featured = all.filter(m => m.label.includes("Flash"));
         previewMetrics = featured.length ? featured : all.slice(0, 2);
-      } else if (result.platform === "siliconflow") {
-        previewMetrics = result.metrics.filter(m => m.label !== "优惠券余额");
       } else {
         previewMetrics = result.metrics;
       }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.cookiejar
+import base64
 import json
 import re
 import selectors
@@ -302,6 +303,58 @@ def _is_definitive_auth_failure(exc: Exception) -> bool:
     return False
 
 
+def _decode_jwt_payload(token: str | None) -> dict[str, Any]:
+    if not token:
+        return {}
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return {}
+
+
+def fetch_codex_reset_credits(timeout: float = 10.0) -> dict[str, Any]:
+    auth_path = Path.home() / ".codex" / "auth.json"
+    auth = json.loads(auth_path.read_text())
+    tokens = auth.get("tokens") or {}
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise FileNotFoundError("Codex ChatGPT access token not found")
+
+    account_id = tokens.get("account_id")
+    id_claims = _decode_jwt_payload(tokens.get("id_token"))
+    access_claims = _decode_jwt_payload(access_token)
+    auth_claims = (
+        id_claims.get("https://api.openai.com/auth")
+        or access_claims.get("https://api.openai.com/auth")
+        or {}
+    )
+    account_id = account_id or auth_claims.get("chatgpt_account_id")
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Originator": "Codex Desktop",
+        "User-Agent": "Codex Desktop",
+    }
+    if account_id:
+        headers["ChatGPT-Account-ID"] = account_id
+    if auth_claims.get("chatgpt_account_is_fedramp"):
+        headers["X-OpenAI-Fedramp"] = "true"
+
+    response = httpx.get(
+        "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+        headers=headers,
+        timeout=timeout,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def _load_cookie_jar_for_request(config: PlatformConfig, override: dict[str, Any]) -> http.cookiejar.CookieJar | None:
     try:
         return load_cookie_jar(config.cookie_file)
@@ -384,6 +437,7 @@ function emitUsage(parsed) {
       plan_type: parsed.plan_type,
       rate_limit: parsed.rate_limit,
       credits: parsed.credits,
+      rate_limit_reset_credits: parsed.rate_limit_reset_credits || parsed.rateLimitResetCredits,
       source: 'codex-app-cache',
     }));
     process.exit(0);
@@ -471,6 +525,11 @@ def fetch_codex_app_server_usage(timeout: float = 10.0) -> dict[str, Any]:
             snapshot = payload.get("rateLimits") or {}
             primary = snapshot.get("primary") or {}
             secondary = snapshot.get("secondary") or {}
+            reset_credit_details = None
+            try:
+                reset_credit_details = fetch_codex_reset_credits(timeout=min(timeout, 10.0))
+            except Exception:
+                pass
             return {
                 "plan_type": snapshot.get("planType"),
                 "rate_limit": {
@@ -496,6 +555,8 @@ def fetch_codex_app_server_usage(timeout: float = 10.0) -> dict[str, Any]:
                     } if secondary else {},
                 },
                 "credits": snapshot.get("credits"),
+                "rate_limit_reset_credits": payload.get("rateLimitResetCredits"),
+                "rate_limit_reset_credit_details": reset_credit_details,
                 "source": "codex-app-server",
             }
         raise TimeoutError("Codex app-server rate limit request timed out")
